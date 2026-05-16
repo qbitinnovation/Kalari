@@ -1,0 +1,350 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap');
+
+:root {
+  --background: #fdf8ee;
+  --foreground: #3c1a0a;
+}
+
+body {
+  margin: 0;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Custom utilities */
+.bg-gradient-radial {
+  background-image: radial-gradient(var(--tw-gradient-stops));
+}
+
+@media print {
+  .ticket-page {
+    page-break-after: always;
+    width: 105mm;
+    height: 148mm;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Mobile-first responsive styles for Kalari Booking */
+
+/* Seat map scrolling improvements */
+.seat-map-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e0 #f7fafc;
+}
+
+.seat-map-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.seat-map-scroll::-webkit-scrollbar-track {
+  background: #f7fafc;
+  border-radius: 3px;
+}
+
+.seat-map-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 3px;
+}
+
+.seat-map-scroll::-webkit-scrollbar-thumb:hover {
+  background: #a0aec0;
+}
+
+/* Smooth scrolling for seat map on mobile */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Better scrollbar visibility on mobile */
+@media (max-width: 640px) {
+  .overflow-x-auto::-webkit-scrollbar {
+    height: 8px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-track {
+    background: rgba(203, 213, 224, 0.3);
+    border-radius: 4px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-thumb {
+    background: rgba(59, 130, 246, 0.5);
+    border-radius: 4px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-thumb:active {
+    background: rgba(59, 130, 246, 0.8);
+  }
+}
+
+/* Ensure proper touch targets on mobile */
+@media (max-width: 640px) {
+  /* Seat buttons - larger touch targets on mobile */
+  .seat-button {
+    min-width: 32px;
+    min-height: 24px;
+    font-size: 10px;
+  }
+  
+  /* Table responsive behavior */
+  .responsive-table {
+    font-size: 14px;
+  }
+  
+  .responsive-table th,
+  .responsive-table td {
+    padding: 8px 4px;
+  }
+  
+  /* Modal adjustments for mobile */
+  .mobile-modal {
+    margin: 16px;
+    max-height: calc(100vh - 32px);
+  }
+  
+  /* Form inputs on mobile */
+  .mobile-input {
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+  
+  /* Card layouts */
+  .mobile-card {
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  
+  /* Navigation improvements */
+  .mobile-nav-item {
+    padding: 12px 16px;
+    font-size: 16px;
+  }
+}
+
+/* Tablet styles */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .seat-button {
+    min-width: 36px;
+    min-height: 28px;
+  }
+}
+
+/* Landscape phone orientation */
+@media (max-width: 896px) and (orientation: landscape) {
+  .seat-map-container {
+    padding: 8px;
+  }
+  
+  .stage-container {
+    transform: scale(0.8);
+  }
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .seat-button {
+    border-width: 1px;
+  }
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Premium Animations */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out forwards;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s infinite ease-in-out;
+}
+
+/* Glassmorphism */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Typography Enhancements */
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.02em;
+}
+
+/* Selection color */
+::selection {
+  background-color: #fbbf24;
+  color: #000;
+}
+
+/* Admin portal form surfaces */
+.admin-portal {
+  color: #0f172a;
+}
+
+.dark .admin-portal {
+  color: #e2e8f0;
+}
+
+.admin-portal input:not([type="checkbox"]):not([type="radio"]),
+.admin-portal select,
+.admin-portal textarea {
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  color-scheme: light;
+}
+
+.admin-portal input:not([type="checkbox"]):not([type="radio"])::placeholder,
+.admin-portal textarea::placeholder {
+  color: #94a3b8;
+  opacity: 1;
+}
+
+.admin-portal input:not([type="checkbox"]):not([type="radio"]):focus,
+.admin-portal select:focus,
+.admin-portal textarea:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.admin-portal select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+.dark .admin-portal input:not([type="checkbox"]):not([type="radio"]),
+.dark .admin-portal select,
+.dark .admin-portal textarea {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+  color-scheme: dark;
+}
+
+.dark .admin-portal input:not([type="checkbox"]):not([type="radio"])::placeholder,
+.dark .admin-portal textarea::placeholder {
+  color: #64748b;
+}
+
+.dark .admin-portal select option {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+.admin-modal-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+  color: #0f172a;
+}
+
+.dark .admin-modal-panel {
+  background: #020617;
+  border-color: #1e293b;
+  color: #f8fafc;
+}
+
+.admin-modal-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #334155;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.dark .admin-modal-label {
+  color: #cbd5e1;
+}
+
+.admin-modal-field {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 0.75rem 1rem;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.admin-modal-field::placeholder {
+  color: #94a3b8;
+}
+
+.admin-modal-field:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.dark .admin-modal-field {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f8fafc;
+}
