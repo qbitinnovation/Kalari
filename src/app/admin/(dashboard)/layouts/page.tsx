@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { db, Layout } from '@/lib/database'
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { getDefaultArenaStructure } from '@/lib/arenaLayout'
 
 const Layouts: React.FC = () => {
   const [layouts, setLayouts] = useState<Layout[]>([])
@@ -13,38 +14,7 @@ const Layouts: React.FC = () => {
   const [editingLayout, setEditingLayout] = useState<Layout | null>(null)
   const [formData, setFormData] = useState({
     name: '',
-    structure: {
-      sections: [
-        { 
-          name: 'North',
-          rows: [
-            { rowNumber: 1, seats: 16 },
-            { rowNumber: 2, seats: 16 },
-            { rowNumber: 3, seats: 14 },
-            { rowNumber: 4, seats: 12 },
-            { rowNumber: 5, seats: 10 }
-          ]
-        },
-        { 
-          name: 'South',
-          rows: [
-            { rowNumber: 1, seats: 12 },
-            { rowNumber: 2, seats: 12 },
-            { rowNumber: 3, seats: 10 },
-            { rowNumber: 4, seats: 8 },
-            { rowNumber: 5, seats: 6 }
-          ]
-        },
-        { 
-          name: 'East',
-          rows: Array.from({ length: 15 }, (_, i) => ({ rowNumber: i + 1, seats: 2 }))
-        },
-        { 
-          name: 'West',
-          rows: Array.from({ length: 15 }, (_, i) => ({ rowNumber: i + 1, seats: 2 }))
-        }
-      ]
-    }
+    structure: getDefaultArenaStructure()
   })
 
   useEffect(() => {
@@ -106,6 +76,7 @@ const Layouts: React.FC = () => {
     // Convert old format to new format if needed
     const convertedStructure = {
       ...layout.structure,
+      blockedSeats: layout.structure.blockedSeats || [],
       sections: layout.structure.sections?.map((section: any) => {
         if (Array.isArray(section.rows)) {
           // Already in new format
@@ -151,38 +122,7 @@ const Layouts: React.FC = () => {
   const resetForm = () => {
     setFormData({
       name: '',
-      structure: {
-        sections: [
-          { 
-            name: 'North',
-            rows: [
-              { rowNumber: 1, seats: 16 },
-              { rowNumber: 2, seats: 16 },
-              { rowNumber: 3, seats: 14 },
-              { rowNumber: 4, seats: 12 },
-              { rowNumber: 5, seats: 10 }
-            ]
-          },
-          { 
-            name: 'South',
-            rows: [
-              { rowNumber: 1, seats: 12 },
-              { rowNumber: 2, seats: 12 },
-              { rowNumber: 3, seats: 10 },
-              { rowNumber: 4, seats: 8 },
-              { rowNumber: 5, seats: 6 }
-            ]
-          },
-          { 
-            name: 'East',
-            rows: Array.from({ length: 15 }, (_, i) => ({ rowNumber: i + 1, seats: 2 }))
-          },
-          { 
-            name: 'West',
-            rows: Array.from({ length: 15 }, (_, i) => ({ rowNumber: i + 1, seats: 2 }))
-          }
-        ]
-      }
+      structure: getDefaultArenaStructure(),
     })
   }
 
@@ -618,6 +558,25 @@ const Layouts: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className={`block text-sm font-medium mb-2 transition-colors duration-200 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  Blocked / Reserved Seat IDs
+                </label>
+                <input
+                  value={(formData.structure.blockedSeats || []).join(', ')}
+                  onChange={(event) => setFormData({
+                    ...formData,
+                    structure: {
+                      ...formData.structure,
+                      blockedSeats: event.target.value.split(',').map((seat) => seat.trim()).filter(Boolean)
+                    }
+                  })}
+                  className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors duration-200 ${darkMode ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'}`}
+                  placeholder="Example: North-A-1, North-A-2"
+                />
+                <p className={`mt-2 text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Use the same seat IDs generated in booking maps, such as Section-A-1.</p>
               </div>
 
               {/* Layout Summary */}

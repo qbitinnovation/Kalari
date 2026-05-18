@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB, { getGenericModel } from '@/lib/db';
 import mongoose from 'mongoose';
 import { localQuery } from '@/lib/localStore';
+import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity } from '@/lib/booking';
 
 const normalizeIdValue = (value: any) => {
   if (typeof value === 'string' && mongoose.Types.ObjectId.isValid(value)) {
@@ -60,6 +61,21 @@ const attachRelations = async (collection: string, docs: any[] | any) => {
     rows.forEach((show: any) => {
       if (show.layout_id) show.layout = layoutById.get(String(show.layout_id)) || null;
     });
+    const Booking = getGenericModel("bookings") as any;
+    const bookings = await Booking.find({ show_id: { $in: rows.map((show: any) => String(getRecordId(show))) }, status: "CONFIRMED" }).lean();
+    const bookingsByShow = new Map<string, any[]>();
+    bookings.forEach((booking: any) => {
+      const key = String(booking.show_id);
+      bookingsByShow.set(key, [...(bookingsByShow.get(key) || []), booking]);
+    });
+    rows.forEach((show: any) => {
+      const showId = String(getRecordId(show));
+      const capacity = getShowCapacity(show);
+      const booked = countBookedSeats(bookingsByShow.get(showId) || []);
+      show.booked_count = booked;
+      show.available_count = Math.max(0, capacity - booked);
+      show.availability_status = getAvailabilityStatus(capacity, booked);
+    });
   }
 
   if (collection === "bookings") {
@@ -79,6 +95,28 @@ const attachRelations = async (collection: string, docs: any[] | any) => {
     rows.forEach((booking: any) => {
       if (booking.show_id) booking.show = showById.get(String(booking.show_id)) || null;
       if (booking.customer_id) booking.customer = customerById.get(String(booking.customer_id)) || null;
+    });
+  }
+
+  if (collection === "tickets") {
+    const Show = getGenericModel("shows") as any;
+    const Booking = getGenericModel("bookings") as any;
+    const Customer = getGenericModel("customers") as any;
+    const [shows, bookings, customers] = await Promise.all([Show.find().lean(), Booking.find().lean(), Customer.find().lean()]);
+    const showById = new Map<string, any>();
+    const bookingById = new Map<string, any>();
+    const customerById = new Map<string, any>();
+    shows.forEach((show: any) => showById.set(String(recordId(show)), show));
+    bookings.forEach((booking: any) => bookingById.set(String(recordId(booking)), booking));
+    customers.forEach((customer: any) => customerById.set(String(recordId(customer)), customer));
+    rows.forEach((ticket: any) => {
+      if (ticket.show_id) ticket.show = showById.get(String(ticket.show_id)) || null;
+      if (ticket.booking_id) {
+        const booking = bookingById.get(String(ticket.booking_id)) || null;
+        if (booking?.customer_id) booking.customer = customerById.get(String(booking.customer_id)) || null;
+        ticket.booking = booking;
+        ticket.booked_by = booking?.booked_by || ticket.generated_by;
+      }
     });
   }
 

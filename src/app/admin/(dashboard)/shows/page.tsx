@@ -30,7 +30,8 @@ const Shows: React.FC = () => {
     type: 'KALARI' as 'KALARI' | 'EVENT',
     capacity: '',
     layout_id: '',
-    activity_id: ''
+    activity_id: '',
+    status: 'ACTIVE' as 'ACTIVE' | 'HOUSE_FULL' | 'SHOW_STARTED' | 'SHOW_DONE'
   })
 
   useEffect(() => {
@@ -173,7 +174,7 @@ const Shows: React.FC = () => {
         capacity: formData.type === 'EVENT' ? parseInt(formData.capacity) : null,
         layout_id: formData.type === 'KALARI' ? formData.layout_id : null,
         activity_id: formData.activity_id || null,
-        status: 'ACTIVE'
+        status: formData.status
       }
 
       const userEmail = user?.email || 'unknown'
@@ -213,7 +214,8 @@ const Shows: React.FC = () => {
       type: show.type || 'KALARI',
       capacity: show.capacity?.toString() || '',
       layout_id: show.layout_id || '',
-      activity_id: (show as any).activity_id || ''
+      activity_id: (show as any).activity_id || '',
+      status: (show.status as any) || 'ACTIVE'
     })
     setShowModal(true)
   }
@@ -247,7 +249,8 @@ const Shows: React.FC = () => {
       type: 'KALARI',
       capacity: '',
       layout_id: '',
-      activity_id: ''
+      activity_id: '',
+      status: 'ACTIVE'
     })
   }
 
@@ -423,6 +426,15 @@ const Shows: React.FC = () => {
               <div>
                 <label className="admin-modal-label">Price (Rs.)</label>
                 <input type="number" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} required className="admin-modal-field" />
+              </div>
+              <div>
+                <label className="admin-modal-label">Status</label>
+                <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value as any})} className="admin-modal-field">
+                  <option value="ACTIVE">Active</option>
+                  <option value="HOUSE_FULL">Sold Out / House Full</option>
+                  <option value="SHOW_STARTED">Show Started</option>
+                  <option value="SHOW_DONE">Show Done</option>
+                </select>
               </div>
               <div>
                 <label className="admin-modal-label">Image URL</label>

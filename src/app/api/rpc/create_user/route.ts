@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB, { User } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 import { readStore, writeStore } from '@/lib/localStore';
+import { AGENT_DEFAULT_COMMISSION_PERCENTAGE } from '@/lib/booking';
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
       password_hash,
       role: p_role || "staff",
       full_name: p_full_name || "",
-      commission_percentage: p_commission_percentage ? Number(p_commission_percentage) : 0,
+      commission_percentage: p_role === "agent" ? Number(p_commission_percentage ?? AGENT_DEFAULT_COMMISSION_PERCENTAGE) : 0,
       active: true,
       created_at: new Date().toISOString(),
     });
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       password: p_password,
       role: p_role || "staff",
       full_name: p_full_name || "",
-      commission_percentage: p_commission_percentage ? Number(p_commission_percentage) : 0,
+      commission_percentage: p_role === "agent" ? Number(p_commission_percentage ?? AGENT_DEFAULT_COMMISSION_PERCENTAGE) : 0,
       active: true,
       created_at: new Date().toISOString(),
     });

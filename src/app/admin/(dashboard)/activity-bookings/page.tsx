@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { CalendarDays, Plus, RefreshCw, Ticket, Trash2, User } from "lucide-react";
 import { db, Customer } from "@/lib/database";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { createTicketCode, getRecordId, parseSeatCodes } from "@/lib/booking";
 
 type Activity = {
   id: string;
@@ -42,7 +43,7 @@ type BookingRow = {
   customer?: Customer;
 };
 
-const recordId = (record: any) => record?.id || record?._id;
+const recordId = getRecordId;
 
 export default function ActivityBookingsPage() {
   const darkMode = useDarkMode();
@@ -92,12 +93,7 @@ export default function ActivityBookingsPage() {
     return bookings
       .filter((booking) => booking.show_id === slotId && booking.status === "CONFIRMED")
       .reduce((count, booking) => {
-        try {
-          const parsed = JSON.parse(booking.seat_code);
-          return count + (Array.isArray(parsed) ? parsed.length : 1);
-        } catch {
-          return count + String(booking.seat_code || "").split(",").filter(Boolean).length;
-        }
+        return count + parseSeatCodes(booking.seat_code).length;
       }, 0);
   };
 
@@ -138,7 +134,7 @@ export default function ActivityBookingsPage() {
         booking_id: bookingId,
         show_id: recordId(selectedSlot),
         seat_code: seatCode,
-        ticket_code: `TKT-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+        ticket_code: createTicketCode(),
         price: Number(selectedSlot.price || 0),
         generated_by: bookedBy,
         generated_at: now,

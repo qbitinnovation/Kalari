@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { getSeedData } from "./seedData";
+import { AGENT_DEFAULT_COMMISSION_PERCENTAGE, countBookedSeats, getAvailabilityStatus, getShowCapacity } from "./booking";
 
 type Store = Record<string, any[]>;
 
@@ -12,7 +13,7 @@ const initialStore = (): Store => {
   return {
     users: [
       { id: "user-admin", email: "admin@kalari.local", password: "admin123", role: "admin", full_name: "Kalari Admin", active: true, created_at: now },
-      { id: "user-agent", email: "agent@kalari.local", password: "admin123", role: "agent", full_name: "Booking Agent", active: true, created_at: now },
+      { id: "user-agent", email: "agent@kalari.local", password: "admin123", role: "agent", full_name: "Booking Agent", commission_percentage: AGENT_DEFAULT_COMMISSION_PERCENTAGE, active: true, created_at: now },
     ],
     activities: seed.activities,
     shows: seed.shows,
@@ -57,6 +58,12 @@ const attachRelations = (store: Store, collection: string, rowsOrRow: any) => {
     const layoutsById = new Map((store.layouts || []).map((layout) => [String(recordId(layout)), layout]));
     rows.forEach((show) => {
       if (show.layout_id) show.layout = layoutsById.get(String(show.layout_id)) || null;
+      const showBookings = (store.bookings || []).filter((booking) => booking.show_id === String(recordId(show)) && booking.status === "CONFIRMED");
+      const capacity = getShowCapacity(show);
+      const booked = countBookedSeats(showBookings);
+      show.booked_count = booked;
+      show.available_count = Math.max(0, capacity - booked);
+      show.availability_status = getAvailabilityStatus(capacity, booked);
     });
   }
 
@@ -66,6 +73,21 @@ const attachRelations = (store: Store, collection: string, rowsOrRow: any) => {
     rows.forEach((booking) => {
       if (booking.show_id) booking.show = showsById.get(String(booking.show_id)) || null;
       if (booking.customer_id) booking.customer = customersById.get(String(booking.customer_id)) || null;
+    });
+  }
+
+  if (collection === "tickets") {
+    const showsById = new Map((store.shows || []).map((show) => [String(recordId(show)), show]));
+    const bookingsById = new Map((store.bookings || []).map((booking) => [String(recordId(booking)), booking]));
+    const customersById = new Map((store.customers || []).map((customer) => [String(recordId(customer)), customer]));
+    rows.forEach((ticket) => {
+      if (ticket.show_id) ticket.show = showsById.get(String(ticket.show_id)) || null;
+      if (ticket.booking_id) {
+        const booking = bookingsById.get(String(ticket.booking_id)) || null;
+        if (booking?.customer_id) booking.customer = customersById.get(String(booking.customer_id)) || null;
+        ticket.booking = booking;
+        ticket.booked_by = booking?.booked_by || ticket.generated_by;
+      }
     });
   }
 

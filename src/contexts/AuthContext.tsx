@@ -8,6 +8,7 @@ interface User {
   email: string
   role: 'admin' | 'staff' | 'agent'
   full_name?: string
+  commission_percentage?: number
 }
 
 interface AuthContextType {

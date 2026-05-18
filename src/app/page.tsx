@@ -6,6 +6,7 @@ import { ArrowRight, CalendarDays, Clock, Heart, MapPin, Search, Star } from "lu
 import PublicNavbar from "@/components/PublicNavbar";
 import { PublicFooter } from "@/components/PublicFooter";
 import { activityImages } from "@/lib/seedData";
+import { getAvailabilityLabel } from "@/lib/booking";
 
 type Activity = {
   id: string;
@@ -30,6 +31,8 @@ type Show = {
   price: number;
   type: "KALARI" | "EVENT";
   status: string;
+  availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
+  available_count?: number;
   activity_id?: string;
   image?: string;
   description?: string;
@@ -79,6 +82,13 @@ export default function Home() {
             <span className="flex-1 truncate text-left text-lg font-bold text-slate-600">Find Kalary shows and activities</span>
             <span className="rounded-full bg-[#0875e1] px-9 py-5 text-xl font-black text-white">Search</span>
           </Link>
+          <div className="mt-5 grid w-full max-w-4xl gap-3 rounded-lg bg-white/95 p-3 text-left shadow-xl backdrop-blur md:grid-cols-[1fr_1fr_auto]">
+            <QuickSelect label="Next show" value={kalaryShows[0]?.title || "Choose a programme"} />
+            <QuickSelect label="Availability" value={kalaryShows[0] ? `${getAvailabilityLabel(kalaryShows[0].availability_status || "AVAILABLE")}${kalaryShows[0].available_count !== undefined ? `, ${kalaryShows[0].available_count} left` : ""}` : "Check schedule"} />
+            <Link href={kalaryShows[0] ? `/book?show=${kalaryShows[0].id}` : "/book"} className="inline-flex items-center justify-center rounded-lg bg-[#10284a] px-6 py-4 text-sm font-black text-white">
+              Quick book
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -138,6 +148,7 @@ const ShowCard = ({ show, image }: { show: Show; image: string }) => (
     <div className="relative">
       <img src={image} alt={show.title} className="h-56 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
       <span className="absolute left-3 top-3 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wider text-emerald-800">Kalari show</span>
+      <span className={`absolute bottom-3 left-3 rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider ${show.availability_status === "SOLD_OUT" ? "bg-red-50 text-red-800" : show.availability_status === "FILLING_FAST" ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"}`}>{getAvailabilityLabel(show.availability_status || "AVAILABLE")}</span>
       <button className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#10284a] shadow-lg" aria-label="Save show">
         <Heart className="h-6 w-6" />
       </button>
@@ -152,7 +163,7 @@ const ShowCard = ({ show, image }: { show: Show; image: string }) => (
       </div>
       <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
         <span className="text-sm font-bold text-slate-500">From <strong className="text-xl text-[#10284a]">Rs. {show.price}</strong></span>
-        <span className="rounded-full bg-[#0875e1] px-5 py-3 text-sm font-black text-white">Book</span>
+        <span className={`rounded-full px-5 py-3 text-sm font-black text-white ${show.availability_status === "SOLD_OUT" ? "bg-slate-400" : "bg-[#0875e1]"}`}>{show.availability_status === "SOLD_OUT" ? "Full" : "Book"}</span>
       </div>
     </div>
   </Link>
@@ -187,5 +198,12 @@ const SkeletonRail = () => (
 const EmptyState = ({ text }: { text: string }) => (
   <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-12 text-center font-semibold text-slate-600">
     {text}
+  </div>
+);
+
+const QuickSelect = ({ label, value }: { label: string; value: string }) => (
+  <div className="rounded-lg bg-slate-50 px-4 py-3">
+    <div className="text-xs font-black uppercase tracking-widest text-slate-400">{label}</div>
+    <div className="mt-1 truncate text-sm font-black text-[#10284a]">{value}</div>
   </div>
 );

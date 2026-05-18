@@ -11,6 +11,7 @@ import {
   EyeIcon
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface TicketWithDetails extends Ticket {
   show?: {
@@ -20,6 +21,7 @@ interface TicketWithDetails extends Ticket {
   }
   booking?: {
     customer_id: string
+    agent_id?: string
     customer?: {
       name: string
       email?: string
@@ -51,6 +53,7 @@ interface BookingGroup {
 
 const Tickets: React.FC = () => {
   const darkMode = useDarkMode()
+  const { user } = useAuth()
   const [bookings, setBookings] = useState<BookingGroup[]>([])
   const [allBookings, setAllBookings] = useState<BookingGroup[]>([]) // Store all bookings for filtering
   const [loading, setLoading] = useState(true)
@@ -62,7 +65,8 @@ const Tickets: React.FC = () => {
 
   useEffect(() => {
     fetchBookings()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role])
 
   // Filter bookings by ticket generated date
   useEffect(() => {
@@ -97,6 +101,7 @@ const Tickets: React.FC = () => {
       const groupedBookings: { [key: string]: BookingGroup } = {}
       
       data?.forEach((ticket: TicketWithDetails) => {
+        if (user?.role === 'agent' && ticket.booking?.agent_id !== user.id && ticket.booking?.agent_id !== (user as any)._id) return
         if (!groupedBookings[ticket.booking_id]) {
           groupedBookings[ticket.booking_id] = {
             booking_id: ticket.booking_id,
@@ -141,7 +146,8 @@ const Tickets: React.FC = () => {
     
     const matchesStatus = statusFilter === 'all' || 
       (statusFilter === 'active' && booking.status === 'ACTIVE') ||
-      (statusFilter === 'completed' && booking.status === 'COMPLETED')
+      (statusFilter === 'completed' && booking.status === 'COMPLETED') ||
+      (statusFilter === 'revoked' && booking.status === 'REVOKED')
     
     return matchesSearch && matchesStatus
   })
@@ -438,6 +444,7 @@ const Tickets: React.FC = () => {
               <option value="all">All Status</option>
               <option value="active">Active</option>
               <option value="completed">Completed</option>
+              <option value="revoked">Revoked</option>
             </select>
           </div>
         </div>

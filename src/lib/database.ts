@@ -158,6 +158,9 @@ export interface Show {
   layout_id?: string;
   active: boolean;
   status?: "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE";
+  booked_count?: number;
+  available_count?: number;
+  availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
   created_at: string;
   layout?: Layout;
 }
@@ -193,6 +196,12 @@ export interface Booking {
   customer_id?: string;
   agent_id?: string;
   commission_amount?: number;
+  payment_method?: string;
+  payment_status?: "PAID" | "COD_PENDING" | "FAILED" | "REFUNDED";
+  payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  total_amount?: number;
   booking_time: string;
   status: "CONFIRMED" | "CANCELLED";
   customer?: Customer;
@@ -210,5 +219,5 @@ export interface Ticket {
   price: number;
   generated_by: string;
   generated_at: string;
-  status: "ACTIVE" | "REVOKED";
+  status: "ACTIVE" | "COMPLETED" | "REVOKED";
 }

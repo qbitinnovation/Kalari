@@ -6,6 +6,15 @@ import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logBookingCreation } from '@/utils/activityLogger'
+import { createTicketCode, getRecordId, parseSeatCodes } from '@/lib/booking'
+import {
+  ARENA_TOP_LABEL,
+  arrowForArenaSide,
+  alignClassForArenaSide,
+  groupSeatsByArenaSide,
+  type ArenaSide,
+} from '@/lib/arenaLayout'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface SeatData {
   id: string
@@ -27,7 +36,7 @@ interface Agent {
   active: boolean
 }
 
-const recordId = (record: any) => record?.id || record?._id
+const recordId = getRecordId
 
 const Booking: React.FC = () => {
   const [shows, setShows] = useState<Show[]>([])
@@ -47,6 +56,7 @@ const Booking: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string>('')
   const darkMode = useDarkMode()
+  const { user } = useAuth()
 
   // Filter customers based on search term
   const filteredCustomers = customers.filter(customer =>
@@ -131,6 +141,10 @@ const Booking: React.FC = () => {
         .order('full_name')
       if (error) throw error
       setAgents(data || [])
+      if (user?.role === 'agent') {
+        const self = (data || []).find((agent: Agent) => recordId(agent) === user.id || agent.email === user.email)
+        if (self) setSelectedAgentId(recordId(self))
+      }
     } catch (error) {
       console.error('Error fetching agents:', error)
     }
@@ -200,7 +214,7 @@ const Booking: React.FC = () => {
               const seatName = `${sectionPrefix}${rowLetter}${seat}`
               const seatId = `${section.name}-${rowLetter}-${seat}`
               generatedSeats.push({
-                id: seatId, section: section.name, row: (rowIndex + 1).toString(),
+                id: seatId, section: section.name, row: rowLetter,
                 seat_number: seat.toString(), price: selectedShow?.price || 100, booked: false, seatName: seatName
               })
             }
@@ -232,7 +246,8 @@ const Booking: React.FC = () => {
           else bookedSeats.add(booking.seat_code)
         }
       })
-      generatedSeats.forEach(seat => { seat.booked = bookedSeats.has(seat.id) })
+      const blockedSeats = show.layout.structure.blockedSeats || []
+      generatedSeats.forEach(seat => { seat.booked = bookedSeats.has(seat.id) || blockedSeats.includes(seat.id) })
       setSeats(generatedSeats)
     } catch (error) { console.error(error) } finally { setLoading(false) }
   }
@@ -256,7 +271,7 @@ const Booking: React.FC = () => {
       setLoading(true)
       const { data: existingBookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(selectedShow)).eq('status', 'CONFIRMED')
       const allBookedSeats = existingBookings?.flatMap(booking => {
-        try { return JSON.parse(booking.seat_code) } catch { return booking.seat_code.includes(',') ? booking.seat_code.split(',').map((s: string) => s.trim()) : [booking.seat_code] }
+        return parseSeatCodes(booking.seat_code)
       }) || []
       const conflictingSeats = selectedSeats.filter(seat => allBookedSeats.includes(seat))
       if (conflictingSeats.length > 0) {
@@ -275,6 +290,9 @@ const Booking: React.FC = () => {
         customer_id: selectedCustomer.id,
         agent_id: selectedAgentId || null,
         commission_amount: commissionAmount,
+        payment_method: 'COUNTER',
+        payment_status: 'PAID',
+        total_amount: getTotalAmount(),
         booking_time: new Date().toISOString(),
         status: 'CONFIRMED'
       }
@@ -285,7 +303,7 @@ const Booking: React.FC = () => {
 
       const ticketsToInsert = selectedSeats.map(seatCode => ({
         booking_id: booking.id, show_id: recordId(selectedShow), seat_code: seatCode,
-        ticket_code: `TKT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        ticket_code: createTicketCode(),
         price: selectedShow.price || 100, generated_by: 'admin', generated_at: new Date().toISOString(), status: 'ACTIVE'
       }))
 
@@ -308,6 +326,61 @@ const Booking: React.FC = () => {
     if (!selectedCustomer) return
     setShowCustomerModal(false)
     await handleBookSeats()
+  }
+
+  const getRowsForSection = (section: string) =>
+    seats
+      .filter((seat) => seat.section === section)
+      .reduce<Record<string, SeatData[]>>((grouped, seat) => {
+        const rowLetter = seat.seatName?.charAt(1) || seat.row
+        grouped[rowLetter] = grouped[rowLetter] || []
+        grouped[rowLetter].push(seat)
+        return grouped
+      }, {})
+
+  const renderAdminSeatButton = (seat: SeatData) => (
+    <motion.button
+      key={seat.id}
+      onClick={() => toggleSeat(seat.id)}
+      disabled={seat.booked}
+      whileHover={{ scale: seat.booked ? 1 : 1.08 }}
+      className={`h-8 w-9 rounded border text-[10px] font-bold transition-all ${
+        seat.booked ? 'bg-red-100 border-red-300 text-red-600 opacity-50' :
+        selectedSeats.includes(seat.id) ? 'bg-green-500 border-green-600 text-white shadow-lg shadow-green-500/30' :
+        darkMode ? 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600' : 'bg-white border-slate-300 text-slate-700 hover:border-slate-400'
+      }`}
+    >
+      {seat.seatName || seat.seat_number}
+    </motion.button>
+  )
+
+  const renderArenaSide = (rows: SeatData[][], side: ArenaSide) => {
+    if (rows.length === 0) return null
+    const borderTone =
+      side === 'top' ? 'border-blue-500/30' : side === 'right' ? 'border-purple-500/30' : side === 'bottom' ? 'border-orange-500/30' : 'border-emerald-500/30'
+    return (
+      <div className={`rounded-2xl border-2 border-dashed p-4 ${borderTone}`}>
+        {side === 'top' && (
+          <div className="mb-4 flex items-center justify-center gap-3 text-sm font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
+            <span>{ARENA_TOP_LABEL}</span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800">{arrowForArenaSide(side)}</span>
+          </div>
+        )}
+        <div className="space-y-2">
+          {rows.map((rowSeats, index) => (
+            <motion.div
+              key={`${side}-${rowSeats[0]?.seatName || index}`}
+              className={`flex items-center gap-1 ${alignClassForArenaSide(side)}`}
+            >
+              <span className="w-6 shrink-0 text-[10px] font-bold opacity-30">
+                {rowSeats[0]?.seatName?.charAt(1) || String.fromCharCode(65 + index)}
+              </span>
+              {rowSeats.map(renderAdminSeatButton)}
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   const renderRowSeats = (section: any, rowConfig: any, rowIndex: number, sectionSeats: any[]) => {
@@ -337,73 +410,36 @@ const Booking: React.FC = () => {
 
   const renderRectangularSeatMap = () => {
     if (!selectedShow?.layout) return null
-    const sections = selectedShow.layout.structure.sections || []
-    
-    // Mapping for Kalari layout
-    const northSections = sections.filter((s: any) => ['North', 'Front'].includes(s.name))
-    const westSections = sections.filter((s: any) => ['West'].includes(s.name))
-    const eastSections = sections.filter((s: any) => ['East'].includes(s.name))
-    const southSections = sections.filter((s: any) => !['North', 'Front', 'West', 'East'].includes(s.name))
-
-    const renderSection = (section: any, colorClass: string) => {
-      const sectionSeats = seats.filter(s => s.section === section.name)
-      return (
-        <div key={section.name} className={`p-4 rounded-2xl border-2 border-dashed ${colorClass} mb-4`}>
-          <div className="text-center font-black text-sm tracking-widest uppercase mb-4 opacity-60">{section.name}</div>
-          <div className="space-y-2">
-            {Array.isArray(section.rows) ? (
-              section.rows.map((row: any, idx: number) => (
-                <div key={idx} className="flex justify-center items-center gap-1">
-                  <span className="w-6 text-[10px] font-bold opacity-30">{String.fromCharCode(65 + idx)}</span>
-                  {renderRowSeats(section, row, idx, sectionSeats)}
-                </div>
-              ))
-            ) : (
-              Array.from({ length: section.rows || 0 }, (_, idx) => (
-                <div key={idx} className="flex justify-center items-center gap-1">
-                  <span className="w-6 text-[10px] font-bold opacity-30">{String.fromCharCode(65 + idx)}</span>
-                  {renderRowSeats(section, { seats: section.seatsPerRow }, idx, sectionSeats)}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )
-    }
+    const arenaGroups = groupSeatsByArenaSide(seats, getRowsForSection)
 
     return (
-      <div className="space-y-8">
-        {/* North */}
-        <div className="max-w-4xl mx-auto">{northSections.map(s => renderSection(s, 'border-blue-500/30'))}</div>
-        
-        {/* Middle */}
-        <div className="flex flex-col md:flex-row justify-center items-center gap-8">
-          <div className="flex-1 w-full max-w-xs">{westSections.map(s => renderSection(s, 'border-emerald-500/30'))}</div>
-          <div className={`w-32 h-32 rounded-3xl flex items-center justify-center border-4 border-slate-500/20 shadow-inner ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
-             <div className="text-center font-black text-xs tracking-tighter opacity-20">KALARI<br/>STAGE</div>
+      <div className="min-w-[620px] space-y-5 rounded-3xl bg-slate-50 p-5 dark:bg-slate-950/40">
+        {renderArenaSide(arenaGroups.top, 'top')}
+        <div className="grid grid-cols-[1fr_120px_1fr] items-center gap-5">
+          <div className="w-full">{renderArenaSide(arenaGroups.left, 'left')}</div>
+          <div className={`flex h-28 w-28 items-center justify-center rounded-3xl border-4 border-slate-500/20 shadow-inner ${darkMode ? 'bg-slate-800' : 'bg-white'}`}>
+             <div className="text-center text-[9px] font-black uppercase tracking-[0.18em] opacity-40">Kalari<br/>Performance</div>
           </div>
-          <div className="flex-1 w-full max-w-xs">{eastSections.map(s => renderSection(s, 'border-purple-500/30'))}</div>
+          <div className="w-full">{renderArenaSide(arenaGroups.right, 'right')}</div>
         </div>
-
-        {/* South */}
-        <div className="max-w-4xl mx-auto">{southSections.map(s => renderSection(s, 'border-orange-500/30'))}</div>
+        {renderArenaSide(arenaGroups.bottom, 'bottom')}
       </div>
     )
   }
 
   return (
-    <div className={`min-h-screen p-4 sm:p-8 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-      <div className="max-w-7xl mx-auto">
-        <header className="mb-12">
+    <div className={darkMode ? 'text-slate-100' : 'text-slate-900'}>
+      <div className="w-full">
+        <header className="mb-6">
           <h1 className="text-4xl font-black tracking-tight mb-2">Book Seats</h1>
           <p className="opacity-60 font-medium">Manage bookings and issue tickets for Kalari Arena</p>
         </header>
 
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Left Column: Show Selection */}
-          <div className="lg:col-span-1 space-y-6">
-            <div className={`p-6 rounded-[2rem] border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xl shadow-slate-200/50'}`}>
-              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+          <div className="space-y-6 lg:col-span-1">
+            <div className={`rounded-2xl border p-4 shadow-sm sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+              <h2 className="mb-5 flex items-center gap-2 text-xl font-bold">
                 <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
                 Select Date
               </h2>
@@ -422,8 +458,8 @@ const Booking: React.FC = () => {
               </div>
             </div>
 
-            <div className={`p-6 rounded-[2rem] border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xl shadow-slate-200/50'}`}>
-              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+            <div className={`rounded-2xl border p-4 shadow-sm sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+              <h2 className="mb-5 flex items-center gap-2 text-xl font-bold">
                 <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
                 Available Shows
               </h2>
@@ -432,7 +468,7 @@ const Booking: React.FC = () => {
                   <button
                     key={recordId(show)}
                     onClick={() => setSelectedShow(show)}
-                    className={`w-full p-5 rounded-2xl border-2 text-left transition-all ${selectedShow?.id === show.id ? 'border-amber-500 bg-amber-500/5 shadow-lg' : darkMode ? 'border-slate-800 bg-slate-800/50 hover:border-slate-700' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}
+                    className={`w-full rounded-2xl border-2 p-4 text-left transition-all ${selectedShow?.id === show.id ? 'border-amber-500 bg-amber-500/5 shadow-lg' : darkMode ? 'border-slate-800 bg-slate-800/50 hover:border-slate-700' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}
                   >
                     <div className="font-black text-lg leading-tight mb-1">{show.title}</div>
                     <div className="text-xs font-bold opacity-50 uppercase tracking-widest">{format(new Date(show.date), 'EEE, MMM dd')} • {show.time}</div>
@@ -447,8 +483,8 @@ const Booking: React.FC = () => {
           {/* Right Column: Seating Plan */}
           <div className="lg:col-span-2">
             {selectedShow ? (
-              <div className={`p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-2xl shadow-slate-200/40'}`}>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-12">
+              <div className={`rounded-2xl border p-4 shadow-sm transition-all sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                   <div>
                     <h2 className="text-2xl font-black">{selectedShow.title}</h2>
                     <p className="text-sm font-bold opacity-40 uppercase tracking-widest">{format(new Date(selectedShow.date), 'PPPP')} @ {selectedShow.time}</p>
@@ -471,7 +507,7 @@ const Booking: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="h-full min-h-[400px] flex flex-col items-center justify-center opacity-20 border-4 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem]">
+              <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 opacity-20 dark:border-slate-800">
                 <svg className="w-20 h-20 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
                 <div className="text-xl font-black uppercase tracking-widest">Select a show to begin</div>
               </div>
@@ -505,16 +541,22 @@ const Booking: React.FC = () => {
                <div className="space-y-6">
                  <div>
                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Agent (Optional)</label>
-                   <select 
-                     value={selectedAgentId} 
-                     onChange={e => setSelectedAgentId(e.target.value)}
-                     className={`w-full p-4 rounded-2xl border font-bold outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-                   >
-                     <option value="">No Agent</option>
-                     {agents.map(a => (
-                       <option key={a.id} value={a.id}>{a.full_name} ({a.commission_percentage}%)</option>
-                     ))}
-                   </select>
+                   {user?.role === 'agent' ? (
+                     <div className={`w-full p-4 rounded-2xl border font-bold ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                       {agents.find(a => recordId(a) === selectedAgentId)?.full_name || user.email}
+                     </div>
+                   ) : (
+                     <select 
+                       value={selectedAgentId} 
+                       onChange={e => setSelectedAgentId(e.target.value)}
+                       className={`w-full p-4 rounded-2xl border font-bold outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                     >
+                       <option value="">No Agent</option>
+                       {agents.map(a => (
+                         <option key={recordId(a)} value={recordId(a)}>{a.full_name} ({a.commission_percentage}%)</option>
+                       ))}
+                     </select>
+                   )}
                  </div>
 
                  <div className={`p-6 rounded-3xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>

@@ -8,6 +8,7 @@ import { PublicFooter } from '@/components/PublicFooter'
 import { Calendar, Clock, MapPin, IndianRupee, ArrowRight, Filter, Sparkles } from 'lucide-react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
+import { getAvailabilityLabel } from '@/lib/booking'
 
 interface PublicShow {
   id: string
@@ -19,6 +20,8 @@ interface PublicShow {
   image?: string
   description?: string
   status: string
+  availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT"
+  available_count?: number
   type?: 'KALARI' | 'EVENT'
 }
 
@@ -49,12 +52,11 @@ const Schedule: React.FC = () => {
     }
   }
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'ACTIVE': return 'bg-emerald-100 text-emerald-800 border-emerald-200'
-      case 'HOUSE_FULL': return 'bg-red-100 text-red-800 border-red-200'
-      default: return 'bg-stone-100 text-stone-600 border-stone-200'
-    }
+  const getStatusBadge = (show: PublicShow) => {
+    if (show.status === 'HOUSE_FULL' || show.availability_status === 'SOLD_OUT') return 'bg-red-100 text-red-800 border-red-200'
+    if (show.availability_status === 'FILLING_FAST') return 'bg-amber-100 text-amber-800 border-amber-200'
+    if (show.status === 'ACTIVE') return 'bg-emerald-100 text-emerald-800 border-emerald-200'
+    return 'bg-stone-100 text-stone-600 border-stone-200'
   }
 
   return (
@@ -132,8 +134,8 @@ const Schedule: React.FC = () => {
                           alt={show.title}
                         />
                         <div className="absolute top-4 left-4 flex gap-2">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border backdrop-blur-md ${getStatusBadge(show.status)}`}>
-                            {show.status === 'ACTIVE' ? 'Available' : 'House Full'}
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border backdrop-blur-md ${getStatusBadge(show)}`}>
+                            {show.status === 'HOUSE_FULL' ? 'Sold Out' : getAvailabilityLabel(show.availability_status || 'AVAILABLE')}
                           </span>
                         </div>
                         {show.type === 'EVENT' && (
@@ -160,7 +162,7 @@ const Schedule: React.FC = () => {
                             <div className="text-2xl font-black">₹{show.price}</div>
                           </div>
                           
-                          {show.status === 'ACTIVE' ? (
+                          {show.status === 'ACTIVE' && show.availability_status !== 'SOLD_OUT' ? (
                             <Link 
                               href={`/book?show=${show.id || (show as any)._id}`} 
                               className="bg-stone-950 text-white px-6 py-3 rounded-2xl font-black text-sm hover:bg-amber-600 transition-all flex items-center gap-2 group/btn"

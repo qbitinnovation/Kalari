@@ -29,7 +29,14 @@ const PublicNavbar = () => {
         <Link href="/" className="flex items-center gap-2 group">
           <Logo />
         </Link>
-        <div className="hidden md:flex items-center gap-8 text-sm font-bold text-stone-600">
+        <div className="hidden md:flex items-center gap-6 text-sm font-bold text-stone-600">
+          <Link href="/schedule" className="hover:text-amber-600 transition-colors">Shows</Link>
+          <Link href="/activities" className="hover:text-amber-600 transition-colors">Activities</Link>
+          <Link href="/packages" className="hover:text-amber-600 transition-colors">Packages</Link>
+          <Link href="/gallery" className="hover:text-amber-600 transition-colors">Gallery</Link>
+          <Link href="/blog" className="hover:text-amber-600 transition-colors">Blog</Link>
+          <Link href="/about" className="hover:text-amber-600 transition-colors">About</Link>
+          <Link href="/contact" className="hover:text-amber-600 transition-colors">Contact</Link>
           <Link href="/book" className="hover:text-amber-600 transition-colors">Book Now</Link>
           <Link href="/admin/login" className="px-5 py-2.5 bg-stone-900 text-white rounded-full hover:bg-stone-800 transition-all active:scale-95 shadow-lg shadow-stone-900/20">Staff Login</Link>
         </div>

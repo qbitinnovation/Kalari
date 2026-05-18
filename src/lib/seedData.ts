@@ -1,3 +1,5 @@
+import { getDefaultArenaStructure } from "./arenaLayout";
+
 const toDate = (offsetDays: number) => {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
@@ -19,13 +21,7 @@ export const getSeedData = () => {
   const layout = {
     id: "layout-main-arena",
     name: "Main Kalari Arena",
-    structure: {
-      sections: [
-        { name: "Front", rows: [{ seats: 10 }, { seats: 10 }, { seats: 10 }] },
-        { name: "Middle", rows: [{ seats: 12 }, { seats: 12 }, { seats: 12 }, { seats: 12 }] },
-        { name: "Balcony", rows: [{ seats: 14 }, { seats: 14 }] },
-      ],
-    },
+    structure: getDefaultArenaStructure(),
     created_at: new Date().toISOString(),
   };
 

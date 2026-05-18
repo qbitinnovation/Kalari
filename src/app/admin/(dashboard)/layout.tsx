@@ -65,6 +65,18 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [passwordLoading, setPasswordLoading] = useState(false)
 
   useEffect(() => {
+    if (!user) return
+    const staffRoutes = ['/admin/booking', '/admin/tickets', '/admin/customers', '/admin/activity-bookings']
+    const agentRoutes = ['/admin/booking', '/admin/tickets']
+    if (user.role === 'staff' && !staffRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
+      router.replace('/admin/booking')
+    }
+    if (user.role === 'agent' && !agentRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
+      router.replace('/admin/booking')
+    }
+  }, [pathname, router, user])
+
+  useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark')
     } else {
@@ -128,18 +140,22 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }
 
   const getNavigation = () => {
-    const baseNavigation = [
-      { name: 'Shows', href: '/admin/shows', icon: Film },
+    const staffNavigation = [
       { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
       { name: 'Activity Bookings', href: '/admin/activity-bookings', icon: Map },
       { name: 'Customers', href: '/admin/customers', icon: User },
+      { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
+    ]
+    const agentNavigation = [
+      { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
       { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
     ]
 
     if (user?.role === 'admin') {
       return [
         { name: 'Dashboard', href: '/admin', icon: Home },
-        ...baseNavigation,
+        { name: 'Shows', href: '/admin/shows', icon: Film },
+        ...staffNavigation,
         { name: 'Activities', href: '/admin/activities', icon: Map },
         { name: 'Layouts', href: '/admin/layouts', icon: LayoutGrid },
         { name: 'Customer Reports', href: '/admin/customer-reports', icon: FileText },
@@ -150,12 +166,9 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         { name: 'Settings', href: '/admin/settings', icon: SettingsIcon },
       ]
     } else if (user?.role === 'agent') {
-       return [
-        { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
-        { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
-       ]
+       return agentNavigation
     } else {
-      return baseNavigation
+      return staffNavigation
     }
   }
 
@@ -482,8 +495,10 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </div>
 
       <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'}`}>
-        <main className="p-3 sm:p-4 lg:p-6 min-h-screen">
-          {children}
+        <main className="min-h-screen px-2 pb-4 sm:px-4 lg:px-6 lg:pb-6">
+          <div className="admin-page-surface min-h-[calc(100vh-7.25rem)] rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 shadow-sm sm:p-6">
+            {children}
+          </div>
         </main>
       </div>
 

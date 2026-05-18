@@ -2,8 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap');
-
 :root {
   --background: #fdf8ee;
   --foreground: #3c1a0a;
@@ -347,4 +345,34 @@ h1, h2, h3, h4, h5, h6 {
   background: #0f172a;
   border-color: #334155;
   color: #f8fafc;
+}
+
+/* Admin page shell */
+.admin-page-surface {
+  color-scheme: light;
+}
+
+.admin-page-surface h1 {
+  color: #0f172a !important;
+  font-size: 1.375rem !important;
+  line-height: 1.875rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  margin-bottom: 0.25rem;
+}
+
+.admin-page-surface h1 + p {
+  color: #64748b !important;
+  font-size: 0.875rem !important;
+  line-height: 1.375rem !important;
+  font-weight: 500 !important;
+  opacity: 1 !important;
+  margin-top: 0 !important;
+}
+
+@media (max-width: 640px) {
+  .admin-page-surface h1 {
+    font-size: 1.25rem !important;
+    line-height: 1.75rem !important;
+  }
 }

@@ -16,6 +16,9 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
+    if (user.active === false) {
+      return NextResponse.json({ error: "This account is disabled" }, { status: 403 });
+    }
 
     const hash = user.password_hash || user.password;
     if (!hash) {
@@ -34,7 +37,8 @@ export async function POST(req: NextRequest) {
           id: String(user._id),
           email: user.email,
           role: user.role || "staff",
-          full_name: user.full_name || ""
+          full_name: user.full_name || "",
+          commission_percentage: user.commission_percentage || 0
         }
       }
     });
@@ -44,10 +48,11 @@ export async function POST(req: NextRequest) {
     const store = await readStore();
     const user = store.users.find((item: any) => item.email === email && item.password === password);
     if (!user) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    if (user.active === false) return NextResponse.json({ error: "This account is disabled" }, { status: 403 });
     return NextResponse.json({
       data: {
         success: true,
-        user: { id: user.id, email: user.email, role: user.role, full_name: user.full_name || "" },
+        user: { id: user.id, email: user.email, role: user.role, full_name: user.full_name || "", commission_percentage: user.commission_percentage || 0 },
       },
       fallback: true,
     });

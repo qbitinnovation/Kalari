@@ -18,7 +18,16 @@ import {
   User,
   WalletCards,
 } from 'lucide-react'
+import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { db } from '@/lib/database'
+import {
+  ARENA_TOP_LABEL,
+  arrowForArenaSide,
+  alignClassForArenaSide,
+  groupSeatsByArenaSide,
+  type ArenaSide,
+} from '@/lib/arenaLayout'
+import { createTicketCode, getAvailabilityLabel, getRecordId, parseSeatCodes } from '@/lib/booking'
 
 const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ''
 
@@ -49,6 +58,9 @@ interface Show {
   image?: string
   description?: string
   status: string
+  booked_count?: number
+  available_count?: number
+  availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT"
   layout?: { structure: any }
   type?: 'KALARI' | 'EVENT'
   capacity?: number
@@ -69,8 +81,6 @@ interface BookingForm {
 
 type PaymentMethod = 'razorpay' | 'cod'
 type Step = 'show' | 'seats' | 'details' | 'payment' | 'success'
-
-const getRecordId = (record: any) => record?.id || record?._id?.toString()
 
 const stepLabels: { id: Step; label: string }[] = [
   { id: 'show', label: 'Show' },
@@ -100,6 +110,8 @@ const BookingContent: React.FC = () => {
   const [notice, setNotice] = useState('')
   const [bookingId, setBookingId] = useState('')
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'COD_PENDING'>('PAID')
+  const [ticketCodes, setTicketCodes] = useState<string[]>([])
+  const [showsLoading, setShowsLoading] = useState(true)
 
   useEffect(() => {
     fetchShows()
@@ -122,6 +134,7 @@ const BookingContent: React.FC = () => {
   }, [preselectedShowId, shows])
 
   const fetchShows = async () => {
+    setShowsLoading(true)
     let query = db
       .from('shows')
       .select('*, layout:layouts(*)')
@@ -137,6 +150,7 @@ const BookingContent: React.FC = () => {
 
     if (error) setNotice(error.message || 'Unable to load shows.')
     setShows(data || [])
+    setShowsLoading(false)
   }
 
   const fetchBookedSeats = async (showId: string) => {
@@ -148,15 +162,7 @@ const BookingContent: React.FC = () => {
 
     const nextBooked = new Set<string>()
     data?.forEach((booking: any) => {
-      try {
-        const parsed = JSON.parse(booking.seat_code)
-        if (Array.isArray(parsed)) parsed.forEach(seat => nextBooked.add(seat))
-        else nextBooked.add(String(parsed))
-      } catch {
-        String(booking.seat_code || '').split(',').forEach(seat => {
-          if (seat.trim()) nextBooked.add(seat.trim())
-        })
-      }
+      parseSeatCodes(booking.seat_code).forEach(seat => nextBooked.add(seat))
     })
     setBookedSeats(nextBooked)
   }
@@ -203,6 +209,97 @@ const BookingContent: React.FC = () => {
     setSelectedSeats(current => current.includes(seatId) ? current.filter(id => id !== seatId) : [...current, seatId])
   }
 
+  const getRowsForSection = (section: string) => {
+    return seats.filter(seat => seat.section === section).reduce<Record<string, SeatOption[]>>((grouped, seat) => {
+      grouped[seat.row] = grouped[seat.row] || []
+      grouped[seat.row].push(seat)
+      return grouped
+    }, {})
+  }
+
+  const renderSeatButton = (seat: SeatOption) => {
+    const blockedSeats = selectedShow?.layout?.structure?.blockedSeats || []
+    const isBooked = bookedSeats.has(seat.id) || blockedSeats.includes(seat.id)
+    const isSelected = selectedSeats.includes(seat.id)
+    return (
+      <button
+        key={seat.id}
+        onClick={() => toggleSeat(seat.id)}
+        disabled={isBooked}
+        className={`h-8 w-9 rounded-lg border text-[10px] font-bold transition ${isBooked ? 'cursor-not-allowed border-red-200 bg-red-50 text-red-300' : isSelected ? 'border-amber-500 bg-amber-400 text-stone-950 shadow-md' : 'border-stone-200 bg-white text-stone-700 hover:border-emerald-500 hover:bg-emerald-50'}`}
+      >
+        {seat.label}
+      </button>
+    )
+  }
+
+  const arenaSeatGroups = useMemo(
+    () => groupSeatsByArenaSide(seats, getRowsForSection),
+    [seats]
+  )
+
+  const renderGuestSeatGroup = (rows: SeatOption[][], side: ArenaSide) => {
+    if (rows.length === 0) return null
+    return (
+      <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
+        {side === 'top' && (
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-800">{ARENA_TOP_LABEL}</h3>
+            <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-stone-500 ring-1 ring-stone-200">
+              {arrowForArenaSide(side)}
+            </span>
+          </div>
+        )}
+        <div className="overflow-x-auto">
+          <div className="min-w-max space-y-2">
+            {rows.map((rowSeats, index) => (
+              <div
+                key={`${side}-${rowSeats[0]?.row || index}`}
+                className={`flex items-center gap-2 ${alignClassForArenaSide(side)}`}
+              >
+                <span className="w-6 shrink-0 text-center text-xs font-bold text-stone-400">
+                  {rowSeats[0]?.row || String.fromCharCode(65 + index)}
+                </span>
+                {rowSeats.map(renderSeatButton)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const renderGuestKalariSeatMap = () => {
+    return (
+      <div className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-stone-200">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-stone-950">Kalari arena seating</h3>
+            <p className="mt-1 text-sm font-medium text-stone-500">Seats face the center performance space.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-bold">
+            <span className="rounded-full bg-white px-3 py-1 text-stone-600 ring-1 ring-stone-200">Available</span>
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">Selected</span>
+            <span className="rounded-full bg-red-50 px-3 py-1 text-red-500">Booked</span>
+          </div>
+        </div>
+        <div className="overflow-x-auto pb-2">
+          <div className="min-w-[560px] space-y-5 rounded-2xl bg-[#f7f3eb] p-4">
+            {renderGuestSeatGroup(arenaSeatGroups.top, 'top')}
+            <div className="grid grid-cols-[1fr_112px_1fr] items-center gap-4">
+              <div>{renderGuestSeatGroup(arenaSeatGroups.left, 'left')}</div>
+              <div className="flex h-28 w-28 items-center justify-center rounded-2xl border-4 border-stone-300 bg-stone-950 text-center text-[9px] font-black uppercase tracking-[0.18em] text-white shadow-inner">
+                Kalari<br />Performance
+              </div>
+              <div>{renderGuestSeatGroup(arenaSeatGroups.right, 'right')}</div>
+            </div>
+            {renderGuestSeatGroup(arenaSeatGroups.bottom, 'bottom')}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const validateDetails = () => {
     const nextErrors: Partial<BookingForm> = {}
     if (!form.name.trim()) nextErrors.name = 'Name is required.'
@@ -223,15 +320,7 @@ const BookingContent: React.FC = () => {
 
     const unavailable = new Set<string>()
     data?.forEach((booking: any) => {
-      try {
-        const parsed = JSON.parse(booking.seat_code)
-        if (Array.isArray(parsed)) parsed.forEach(seat => unavailable.add(seat))
-        else unavailable.add(String(parsed))
-      } catch {
-        String(booking.seat_code || '').split(',').forEach(seat => {
-          if (seat.trim()) unavailable.add(seat.trim())
-        })
-      }
+      parseSeatCodes(booking.seat_code).forEach(seat => unavailable.add(seat))
     })
     setBookedSeats(unavailable)
     return unavailable
@@ -277,7 +366,7 @@ const BookingContent: React.FC = () => {
     return getRecordId(customers[0])
   }
 
-  const saveBooking = async (paymentId: string, method: PaymentMethod, status: 'PAID' | 'COD_PENDING') => {
+  const saveBooking = async (paymentId: string, method: PaymentMethod, status: 'PAID' | 'COD_PENDING', razorpayOrderId?: string) => {
     if (!selectedShow) throw new Error('No show selected.')
     if (!(await verifySeatAvailability())) throw new Error('Selected seats are no longer available.')
 
@@ -297,6 +386,8 @@ const BookingContent: React.FC = () => {
       booking_time: now,
       status: 'CONFIRMED',
       payment_id: paymentId,
+      razorpay_payment_id: method === 'razorpay' ? paymentId : null,
+      razorpay_order_id: razorpayOrderId || null,
       payment_method: method === 'cod' ? 'COD' : 'RAZORPAY',
       payment_status: status,
       total_amount: totalAmount,
@@ -305,19 +396,22 @@ const BookingContent: React.FC = () => {
     if (bookingError || !bookings?.[0]) throw new Error(bookingError?.message || 'Booking could not be saved.')
     const savedBookingId = getRecordId(bookings[0])
 
-    const { error: ticketError } = await db.from('tickets').insert(seatCodesToSave.map(seatCode => ({
+    const generatedTickets = seatCodesToSave.map(seatCode => ({
       booking_id: savedBookingId,
       show_id: getRecordId(selectedShow),
       seat_code: seatCode,
-      ticket_code: `TKT-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      ticket_code: createTicketCode(),
       price: Number(selectedShow.price || 0),
       generated_by: form.name.trim(),
       generated_at: now,
       status: 'ACTIVE',
-    })))
+    }))
+
+    const { error: ticketError } = await db.from('tickets').insert(generatedTickets)
 
     if (ticketError) throw new Error(ticketError.message || 'Tickets could not be created.')
     setBookingId(savedBookingId)
+    setTicketCodes(generatedTickets.map(ticket => ticket.ticket_code))
     setPaymentStatus(status)
     setStep('success')
   }
@@ -362,7 +456,7 @@ const BookingContent: React.FC = () => {
               })
               const verifyPayload = await verifyResponse.json().catch(() => ({}))
               if (!verifyResponse.ok || !verifyPayload.data?.valid) return reject(new Error(verifyPayload.error || 'Payment verification failed.'))
-              await saveBooking(response.razorpay_payment_id, 'razorpay', 'PAID')
+              await saveBooking(response.razorpay_payment_id, 'razorpay', 'PAID', response.razorpay_order_id)
               resolve()
             } catch (error) {
               reject(error)
@@ -393,15 +487,15 @@ const BookingContent: React.FC = () => {
   }
 
   return (
-    <main className="min-h-screen bg-stone-950 text-stone-950">
-      <div className="grid min-h-screen lg:grid-cols-[45vw_1fr]">
-        <section className="relative hidden overflow-hidden lg:block">
-          <img src={heroImage} alt="Kalary booking" className="absolute inset-0 h-full w-full object-cover" />
+    <main className="min-h-screen overflow-x-hidden bg-stone-950 text-stone-950">
+      <div className="grid min-h-screen min-w-0 lg:grid-cols-[minmax(420px,42vw)_1fr]">
+        <section className="sticky top-0 hidden h-screen overflow-hidden lg:block">
+          <img src={heroImage} alt="Kalary booking" className="absolute inset-0 h-full w-full object-cover object-[50%_68%]" />
           <div className="absolute inset-0 bg-gradient-to-t from-stone-950 via-stone-950/35 to-transparent" />
           <div className="absolute inset-x-0 bottom-0 p-10 text-white">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-bold backdrop-blur">
               <ShieldCheck className="h-4 w-4 text-amber-300" />
-              COD and Razorpay enabled
+              Pay online or at the venue
             </div>
             <h1 className="max-w-xl text-6xl font-bold leading-tight">Book Experiences</h1>
             <p className="mt-5 max-w-lg text-lg leading-8 text-stone-200">
@@ -409,19 +503,19 @@ const BookingContent: React.FC = () => {
             </p>
             <div className="mt-8 grid grid-cols-3 gap-3">
               {(bookingImages.length ? bookingImages : [heroImage]).map((image, index) => (
-                <img key={image} src={image} alt={`booking view ${index + 1}`} className="h-28 rounded-lg object-cover" />
+                <img key={`${image}-${index}`} src={image} alt={`booking view ${index + 1}`} className="h-28 w-full rounded-lg object-cover object-[50%_68%]" />
               ))}
             </div>
           </div>
         </section>
 
-        <section className="min-h-screen overflow-y-auto bg-[#f7f3eb]">
-          <div className="mx-auto max-w-4xl px-4 py-5 sm:px-6 lg:px-8">
+        <section className="min-w-0 overflow-x-hidden bg-[#f7f3eb] lg:h-screen lg:overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl min-w-0 px-4 py-5 sm:px-6 lg:px-10">
             <div className="mb-5 overflow-hidden rounded-lg bg-stone-950 text-white lg:hidden">
-              <img src={heroImage} alt="Kalary booking" className="h-56 w-full object-cover opacity-80" />
+              <img src={heroImage} alt="Kalary booking" className="h-56 w-full object-cover object-[50%_68%] opacity-80" />
               <div className="p-5">
                 <h1 className="text-3xl font-bold">Book Experiences</h1>
-                <p className="mt-2 text-sm leading-6 text-stone-300">Book tickets with COD or Razorpay in one flow.</p>
+                <p className="mt-2 text-sm leading-6 text-stone-300">Reserve your spot now and choose how you want to pay.</p>
               </div>
             </div>
 
@@ -436,14 +530,14 @@ const BookingContent: React.FC = () => {
               </div>
             </div>
 
-            <div className="mb-5 grid grid-cols-4 gap-2 rounded-lg bg-white p-2 shadow-sm">
+            <div className="mb-5 grid w-full grid-cols-2 gap-2 overflow-hidden rounded-lg bg-white p-2 shadow-sm sm:grid-cols-4">
               {stepLabels.map((item, index) => {
                 const done = activeIndex > index || step === 'success'
                 const active = activeIndex === index
                 return (
-                  <div key={item.id} className={`rounded-lg px-2 py-3 text-center text-xs font-bold ${done ? 'bg-emerald-600 text-white' : active ? 'bg-amber-400 text-stone-950' : 'bg-stone-100 text-stone-500'}`}>
+                  <div key={item.id} className={`min-w-0 rounded-lg px-1.5 py-3 text-center text-xs font-bold sm:px-2 ${done ? 'bg-emerald-600 text-white' : active ? 'bg-amber-400 text-stone-950' : 'bg-stone-100 text-stone-500'}`}>
                     <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-white/40">{done ? <Check className="h-4 w-4" /> : index + 1}</span>
-                    {item.label}
+                    <span className="block truncate">{item.label}</span>
                   </div>
                 )
               })}
@@ -452,31 +546,39 @@ const BookingContent: React.FC = () => {
             {notice && <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">{notice}</div>}
 
             {step === 'show' && (
-              <div className="grid gap-4 md:grid-cols-2">
-                {shows.length === 0 ? (
+              <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                {showsLoading ? (
+                  <div className="md:col-span-2 rounded-lg border border-stone-200 bg-white p-10 text-center text-stone-600 shadow-sm">
+                    Loading available shows...
+                  </div>
+                ) : shows.filter(show => (!preselectedDate || show.date === preselectedDate) && (!preselectedActivityId || (show as any).activity_id === preselectedActivityId)).length === 0 ? (
                   <div className="md:col-span-2 rounded-lg border border-dashed border-stone-300 bg-white p-10 text-center text-stone-600">
                     No shows available right now.
                   </div>
                 ) : shows.filter(show => (!preselectedDate || show.date === preselectedDate) && (!preselectedActivityId || (show as any).activity_id === preselectedActivityId)).map(show => (
                   <button
                     key={getRecordId(show)}
-                    onClick={() => { setSelectedShow(show); setSelectedSeats([]); setStep('seats') }}
-                    className="group overflow-hidden rounded-lg bg-white text-left shadow-sm ring-1 ring-stone-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                    onClick={() => { if (show.availability_status !== 'SOLD_OUT') { setSelectedShow(show); setSelectedSeats([]); setStep('seats') } }}
+                    disabled={show.availability_status === 'SOLD_OUT'}
+                    className="group flex h-full min-h-[445px] w-full max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg bg-white text-left shadow-sm ring-1 ring-stone-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-70 md:max-w-none"
                   >
-                    <img src={show.image || fallbackBookingImage} alt={show.title} className="h-40 w-full object-cover transition duration-500 group-hover:scale-105" />
-                    <div className="p-5">
-                      <div className="mb-3 flex flex-wrap gap-2 text-xs font-bold">
-                        <span className={`rounded-full px-3 py-1 ${show.type === 'EVENT' ? 'bg-purple-50 text-purple-800' : 'bg-emerald-50 text-emerald-800'}`}>
+                    <img src={show.image || fallbackBookingImage} alt={show.title} className="h-40 w-full object-cover object-[50%_68%] transition duration-500 group-hover:scale-105" />
+                    <div className="flex flex-1 flex-col p-5">
+                      <div className="mb-3 grid grid-cols-2 gap-2 text-xs font-bold sm:flex sm:flex-wrap">
+                        <span className={`truncate rounded-full px-3 py-1 text-center sm:text-left ${show.type === 'EVENT' ? 'bg-purple-50 text-purple-800' : 'bg-emerald-50 text-emerald-800'}`}>
                           {show.type === 'EVENT' ? 'Special Event' : 'Kalari Show'}
                         </span>
-                        <span className="rounded-full bg-stone-100 px-3 py-1 text-stone-800">{format(new Date(show.date), 'EEE, MMM dd')}</span>
-                        <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-800">{format(new Date(`2000-01-01T${show.time}`), 'h:mm a')}</span>
+                        <span className={`truncate rounded-full px-3 py-1 text-center sm:text-left ${show.availability_status === 'SOLD_OUT' ? 'bg-red-50 text-red-800' : show.availability_status === 'FILLING_FAST' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>
+                          {getAvailabilityLabel(show.availability_status || 'AVAILABLE')}
+                        </span>
+                        <span className="truncate rounded-full bg-stone-100 px-3 py-1 text-center text-stone-800 sm:text-left">{format(new Date(show.date), 'EEE, MMM dd')}</span>
+                        <span className="truncate rounded-full bg-sky-50 px-3 py-1 text-center text-sky-800 sm:text-left">{format(new Date(`2000-01-01T${show.time}`), 'h:mm a')}</span>
                       </div>
-                      <h3 className="text-xl font-bold">{show.title}</h3>
-                      <p className="mt-2 min-h-[48px] text-sm leading-6 text-stone-600">{show.description || 'Reserved seating for an authentic Kalari live show.'}</p>
-                      <div className="mt-5 flex items-center justify-between">
+                      <h3 className="text-xl font-bold leading-snug">{show.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-stone-600">{show.description || 'Reserved seating for an authentic Kalari live show.'}</p>
+                      <div className="mt-auto flex items-center justify-between gap-4 pt-5">
                         <span className="text-2xl font-bold">Rs. {show.price}</span>
-                        <span className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-4 py-3 text-sm font-bold text-white">Select <ArrowRight className="h-4 w-4" /></span>
+                        <span className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-3 text-sm font-bold text-white ${show.availability_status === 'SOLD_OUT' ? 'bg-stone-400' : 'bg-stone-950'}`}>{show.availability_status === 'SOLD_OUT' ? 'Sold Out' : 'Select'} <ArrowRight className="h-4 w-4" /></span>
                       </div>
                     </div>
                   </button>
@@ -499,49 +601,7 @@ const BookingContent: React.FC = () => {
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div className="mb-4 rounded-lg bg-stone-950 px-4 py-3 text-center text-xs font-bold uppercase tracking-[0.2em] text-white">Performance Stage</div>
-                    <div className="space-y-4">
-                      {sectionNames.map(section => {
-                        const rows = seats.filter(seat => seat.section === section).reduce<Record<string, SeatOption[]>>((grouped, seat) => {
-                          grouped[seat.row] = grouped[seat.row] || []
-                          grouped[seat.row].push(seat)
-                          return grouped
-                        }, {})
-                        return (
-                          <div key={section} className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-stone-200">
-                            <div className="mb-4 flex justify-between">
-                              <h3 className="font-bold capitalize">{section}</h3>
-                              <span className="text-sm font-bold text-stone-500">{Object.values(rows).flat().length} seats</span>
-                            </div>
-                            <div className="overflow-x-auto">
-                              <div className="min-w-max space-y-2">
-                                {Object.entries(rows).map(([row, rowSeats]) => (
-                                  <div key={row} className="flex items-center gap-2">
-                                    <span className="w-6 text-center text-xs font-bold text-stone-400">{row}</span>
-                                    {rowSeats.map(seat => {
-                                      const isBooked = bookedSeats.has(seat.id)
-                                      const isSelected = selectedSeats.includes(seat.id)
-                                      return (
-                                        <button
-                                          key={seat.id}
-                                          onClick={() => toggleSeat(seat.id)}
-                                          disabled={isBooked}
-                                          className={`h-10 w-11 rounded-lg border text-xs font-bold transition ${isBooked ? 'cursor-not-allowed border-red-200 bg-red-50 text-red-300' : isSelected ? 'border-amber-500 bg-amber-400 text-stone-950 shadow-md' : 'border-stone-200 bg-stone-50 text-stone-700 hover:border-emerald-500 hover:bg-emerald-50'}`}
-                                        >
-                                          {seat.label}
-                                        </button>
-                                      )
-                                    })}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </>
+                  renderGuestKalariSeatMap()
                 )}
                 
                 <div className="fixed inset-x-0 bottom-0 z-50 border-t border-stone-200 bg-white p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] sm:relative sm:inset-auto sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
@@ -614,8 +674,15 @@ const BookingContent: React.FC = () => {
                   <Info label="Guest" value={form.name} />
                   <Info label="Total" value={`Rs. ${totalAmount}`} />
                   <div className="sm:col-span-2"><Info label="Seats" value={selectedSeatLabels} /></div>
+                  {ticketCodes.length > 0 && <div className="sm:col-span-2"><Info label="Ticket Codes" value={ticketCodes.join(', ')} mono /></div>}
                 </div>
-                <button onClick={() => window.location.reload()} className="mt-6 rounded-lg bg-stone-950 px-6 py-3 font-bold text-white">Book another ticket</button>
+                <div className="mx-auto mt-6 flex w-fit rounded-lg bg-white p-3 shadow-sm">
+                  <QRCode value={bookingId} size={132} />
+                </div>
+                <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+                  <button onClick={() => window.print()} className="rounded-lg bg-emerald-700 px-6 py-3 font-bold text-white">Print ticket</button>
+                  <button onClick={() => window.location.reload()} className="rounded-lg bg-stone-950 px-6 py-3 font-bold text-white">Book another ticket</button>
+                </div>
               </div>
             )}
           </div>
@@ -639,10 +706,10 @@ const PublicBooking: React.FC = () => {
 
 const TopBar: React.FC<{ title: string; onBack: () => void }> = ({ title, onBack }) => (
   <div className="mb-4 flex items-center justify-between gap-3">
-    <h3 className="text-2xl font-bold">{title}</h3>
-    <button onClick={onBack} className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-bold text-stone-700 shadow-sm ring-1 ring-stone-200">
+    <h3 className="min-w-0 text-2xl font-bold leading-tight">{title}</h3>
+    <button onClick={onBack} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-bold text-stone-700 shadow-sm ring-1 ring-stone-200">
       <ArrowLeft className="h-4 w-4" />
-      Back
+      <span className="hidden sm:inline">Back</span>
     </button>
   </div>
 )
@@ -650,7 +717,7 @@ const TopBar: React.FC<{ title: string; onBack: () => void }> = ({ title, onBack
 const Summary: React.FC<{ show: Show; selectedSeatLabels: string; selectedSeats: number; totalAmount: number }> = ({ show, selectedSeatLabels, selectedSeats, totalAmount }) => (
   <div className="mb-5 rounded-lg bg-white p-4 shadow-sm ring-1 ring-stone-200">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
+      <div className="min-w-0 flex-1">
         <h4 className="font-bold">{show.title}</h4>
         <div className="mt-2 flex flex-wrap gap-3 text-sm text-stone-600">
           <span className="inline-flex items-center gap-1"><CalendarDays className="h-4 w-4" /> {format(new Date(show.date), 'EEE, MMM dd')}</span>
@@ -659,7 +726,7 @@ const Summary: React.FC<{ show: Show; selectedSeatLabels: string; selectedSeats:
         </div>
         {selectedSeatLabels && <div className="mt-3 text-sm font-bold text-stone-800">Seats: {selectedSeatLabels}</div>}
       </div>
-      <div className="text-right">
+      <div className="min-w-[120px] text-left sm:text-right">
         <div className="text-sm font-bold text-stone-500">{selectedSeats} ticket(s)</div>
         <div className="text-2xl font-bold text-amber-700">Rs. {totalAmount}</div>
       </div>
@@ -679,7 +746,7 @@ const PrimaryButton: React.FC<{ children: React.ReactNode; onClick: () => void; 
   <button
     onClick={onClick}
     disabled={disabled}
-    className={`mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg px-6 py-4 font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${dark ? 'bg-stone-950 text-white hover:bg-stone-800' : 'bg-amber-400 text-stone-950 hover:bg-amber-300'}`}
+    className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-6 py-4 font-bold transition disabled:cursor-not-allowed disabled:opacity-50 sm:mt-5 ${dark ? 'bg-stone-950 text-white hover:bg-stone-800' : 'bg-amber-400 text-stone-950 hover:bg-amber-300'}`}
   >
     {children}
     <ArrowRight className="h-5 w-5" />

@@ -1,6 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB, { getGenericModel } from "@/lib/db";
 import { localQuery } from "@/lib/localStore";
+import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity } from "@/lib/booking";
+
+const enrichShows = async (shows: any[]) => {
+  const Layout = getGenericModel("layouts") as any;
+  const Booking = getGenericModel("bookings") as any;
+  const [layouts, bookings] = await Promise.all([
+    Layout.find().lean(),
+    Booking.find({ status: "CONFIRMED" }).lean(),
+  ]);
+
+  const layoutById = new Map<string, any>();
+  layouts.forEach((layout: any) => layoutById.set(String(getRecordId(layout)), layout));
+
+  const bookingsByShow = new Map<string, any[]>();
+  bookings.forEach((booking: any) => {
+    const showId = String(booking.show_id);
+    bookingsByShow.set(showId, [...(bookingsByShow.get(showId) || []), booking]);
+  });
+
+  return shows.map((show: any) => {
+    const next = { ...show };
+    if (next.layout_id) next.layout = layoutById.get(String(next.layout_id)) || null;
+    const capacity = getShowCapacity(next);
+    const booked = countBookedSeats(bookingsByShow.get(String(getRecordId(next))) || []);
+    return {
+      ...next,
+      booked_count: booked,
+      available_count: Math.max(0, capacity - booked),
+      availability_status: getAvailabilityStatus(capacity, booked),
+    };
+  });
+};
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,7 +50,7 @@ export async function GET(req: NextRequest) {
     if (activityId) filters.activity_id = activityId;
 
     const shows = await Show.find(filters).sort({ date: 1, time: 1 }).lean();
-    return NextResponse.json({ data: shows });
+    return NextResponse.json({ data: await enrichShows(shows) });
   } catch (error: any) {
     const { searchParams } = new URL(req.url);
     const rangeFilters: Record<string, any> = {};
@@ -27,6 +59,7 @@ export async function GET(req: NextRequest) {
       rangeFilters.date = { gte: new Date().toISOString().split("T")[0] };
     }
     if (searchParams.get("activityId")) filters.activity_id = searchParams.get("activityId");
-    return NextResponse.json({ data: await localQuery({ collection: "shows", filters, rangeFilters, orderBy: { column: "date", ascending: true } }), fallback: true });
+    const data = await localQuery({ collection: "shows", filters, rangeFilters, orderBy: { column: "date", ascending: true } });
+    return NextResponse.json({ data, fallback: true });
   }
 }
