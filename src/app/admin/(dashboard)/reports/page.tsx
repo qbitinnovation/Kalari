@@ -10,9 +10,12 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logActivity } from '@/utils/activityLogger'
+import { getBookingReference } from '@/lib/booking'
+import { DatePicker } from '@/components/ui'
 
 interface BookingReport {
   booking_id: string
+  booking_reference: string
   show_title: string
   show_date: string
   show_time: string
@@ -110,7 +113,8 @@ const Reports: React.FC = () => {
       
       tickets?.forEach((ticket: any) => {
         const bookingId = ticket.booking_id
-        
+        const bookingReference = getBookingReference(ticket.booking || { id: bookingId })
+          
         if (!bookingMap.has(bookingId)) {
           // Parse seat codes from booking
           let seatCodes: string[] = []
@@ -126,6 +130,7 @@ const Reports: React.FC = () => {
 
           bookingMap.set(bookingId, {
             booking_id: bookingId,
+            booking_reference: bookingReference,
             show_title: ticket.show.title,
             show_date: ticket.show.date,
             show_time: ticket.show.time,
@@ -170,7 +175,7 @@ const Reports: React.FC = () => {
     if (!selectedShow || bookingData.length === 0) return
 
     const headers = [
-      'Booking ID',
+      'Booking Ref',
       'Show Title',
       'Show Date',
       'Show Time',
@@ -183,7 +188,7 @@ const Reports: React.FC = () => {
     ]
 
     const csvData = bookingData.map(booking => [
-      booking.booking_id.slice(0, 8) + '...',
+      booking.booking_reference,
       booking.show_title,
       format(new Date(booking.show_date), 'MMM dd, yyyy'),
       booking.show_time,
@@ -249,43 +254,17 @@ const Reports: React.FC = () => {
       <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-medium mb-4 transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>Filter by Date</h2>
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-          <div className="flex-1">
-            <label className={`block text-sm font-medium mb-2 transition-colors duration-200 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Select Date
-            </label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className={`w-full px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                darkMode 
-                  ? 'bg-gray-700 border-gray-600 text-gray-100 focus:border-gray-500' 
-                  : 'bg-white border-gray-300 text-gray-900 focus:border-gray-400'
-              } focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setSelectedDate('')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                darkMode
-                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Clear Filter
-            </button>
-            <button
-              onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                darkMode
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              Today
-            </button>
-          </div>
+          <DatePicker
+            label="Select Date"
+            value={selectedDate}
+            onChange={setSelectedDate}
+            placeholder="All dates"
+            presets={[
+              { label: 'Clear Filter', value: 'clear' },
+              { label: 'Today', value: 'today' },
+            ]}
+            className="flex-1"
+          />
         </div>
         
         {/* Show count and selected date info */}
@@ -432,7 +411,7 @@ const Reports: React.FC = () => {
                     <thead className={`transition-colors duration-200 ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
                       <tr>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          Booking ID
+                          Booking Ref
                         </th>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                           Seats
@@ -459,7 +438,7 @@ const Reports: React.FC = () => {
                         <tr key={booking.booking_id} className={`transition-colors duration-200 ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}`}>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className={`text-sm font-mono transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {booking.booking_id.slice(0, 8)}...
+                              {booking.booking_reference}
                             </div>
                           </td>
                           <td className="px-6 py-4">

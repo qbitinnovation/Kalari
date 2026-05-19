@@ -38,6 +38,7 @@ const PublicNavbar = () => {
           <Link href="/about" className="hover:text-amber-600 transition-colors">About</Link>
           <Link href="/contact" className="hover:text-amber-600 transition-colors">Contact</Link>
           <Link href="/book" className="hover:text-amber-600 transition-colors">Book Now</Link>
+          <Link href="/customer" className="hover:text-amber-600 transition-colors">My Bookings</Link>
           <Link href="/admin/login" className="px-5 py-2.5 bg-stone-900 text-white rounded-full hover:bg-stone-800 transition-all active:scale-95 shadow-lg shadow-stone-900/20">Staff Login</Link>
         </div>
       </div>

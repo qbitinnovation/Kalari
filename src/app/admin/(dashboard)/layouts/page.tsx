@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react'
 import { db, Layout } from '@/lib/database'
-import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, PencilIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
-import { getDefaultArenaStructure } from '@/lib/arenaLayout'
+import { Button } from '@/components/ui'
+import { getDefaultArenaStructure, getSymmetricArenaSections } from '@/lib/arenaLayout'
 
 const Layouts: React.FC = () => {
   const [layouts, setLayouts] = useState<Layout[]>([])
@@ -43,7 +44,10 @@ const Layouts: React.FC = () => {
     try {
       const layoutData = {
         name: formData.name,
-        structure: formData.structure
+        structure: {
+          ...formData.structure,
+          sections: getSymmetricArenaSections(formData.structure.sections),
+        }
       }
 
       if (editingLayout) {
@@ -188,17 +192,16 @@ const Layouts: React.FC = () => {
             Design and manage 360° seating arrangements
           </p>
         </div>
-        <button
+        <Button
           onClick={() => {
             resetForm()
             setEditingLayout(null)
             setShowModal(true)
           }}
-          className="bg-slate-900 text-white px-6 py-3 rounded-xl font-medium hover:bg-slate-800 transition-all duration-200 flex items-center shadow-sm"
         >
-          <PlusIcon className="h-5 w-5 mr-2" />
+          <PlusIcon className="h-5 w-5" />
           Create Layout
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -392,13 +395,19 @@ const Layouts: React.FC = () => {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className={`rounded-2xl p-8 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto transition-colors duration-200 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h2 className={`text-2xl font-bold mb-6 transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              {editingLayout ? 'Edit Layout' : 'Create New Layout'}
-            </h2>
-            
-            <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="admin-modal-overlay">
+          <form onSubmit={handleSubmit} className="admin-modal-panel admin-modal-card admin-modal-card-lg">
+            <div className="admin-modal-header">
+              <div>
+                <h2 className="admin-modal-title">{editingLayout ? 'Edit Layout' : 'Create Layout'}</h2>
+                <p className="admin-modal-subtitle">Layouts are saved as a symmetric four-sided Kalari arena.</p>
+              </div>
+              <button type="button" onClick={() => setShowModal(false)} className="admin-modal-close" aria-label="Close modal">
+                <XMarkIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="admin-modal-body space-y-6">
               <div>
                 <label className={`block text-sm font-medium mb-2 transition-colors duration-200 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                   Layout Name
@@ -417,8 +426,9 @@ const Layouts: React.FC = () => {
                 <div className="flex justify-between items-center mb-4">
                   <h3 className={`text-lg font-medium transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>Sections</h3>
                   <div className="flex space-x-2">
-                    <button
+                    <Button
                       type="button"
+                      size="sm"
                       onClick={() => {
                         const newSection = { 
                           name: `Section ${formData.structure.sections.length + 1}`,
@@ -436,10 +446,9 @@ const Layouts: React.FC = () => {
                           }
                         })
                       }}
-                      className="px-3 py-1 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
                     >
                       + Add Section
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <div className="space-y-6">
@@ -600,24 +609,13 @@ const Layouts: React.FC = () => {
                   </div>
                 </div>
               </div>
+            </div>
 
-              <div className="flex space-x-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className={`flex-1 py-3 px-4 rounded-xl font-medium transition-colors ${darkMode ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-primary-600 text-white py-3 px-4 rounded-xl font-medium hover:bg-primary-700 transition-colors"
-                >
-                  {editingLayout ? 'Update' : 'Create'} Layout
-                </button>
-              </div>
-            </form>
-          </div>
+            <div className="admin-modal-footer">
+              <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
+              <Button type="submit">{editingLayout ? 'Update' : 'Create'} Layout</Button>
+            </div>
+          </form>
         </div>
       )}
     </div>

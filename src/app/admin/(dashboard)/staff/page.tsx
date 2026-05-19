@@ -5,6 +5,7 @@ import { db } from '@/lib/database'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
+import { Button } from '@/components/ui'
 import {
   Plus,
   Trash2,
@@ -142,13 +143,10 @@ const StaffPage: React.FC = () => {
           <h1 className="text-2xl font-bold">Staff Management</h1>
           <p className="text-sm opacity-60">Manage administrative access and system roles</p>
         </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="bg-amber-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-amber-700 transition-all flex items-center gap-2 shadow-lg shadow-amber-600/20 active:scale-95"
-        >
+        <Button onClick={() => setShowAddForm(true)}>
           <UserPlus className="h-5 w-5" />
           Add Team Member
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -224,13 +222,14 @@ const StaffPage: React.FC = () => {
               </div>
               
               <div className="md:col-span-2 pt-4 flex gap-3">
-                <button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   disabled={formLoading}
-                  className="flex-1 bg-amber-600 text-white py-4 rounded-xl font-black text-sm uppercase tracking-widest hover:bg-amber-700 disabled:opacity-50 transition-all shadow-lg shadow-amber-600/20"
+                  fullWidth
+                  className="uppercase tracking-widest"
                 >
                   {formLoading ? 'Processing...' : showAddForm ? 'Create Account' : 'Update Profile'}
-                </button>
+                </Button>
               </div>
             </form>
           </motion.div>
@@ -323,15 +322,15 @@ const StaffPage: React.FC = () => {
       {/* Delete Dialog */}
       <AnimatePresence>
         {showDeleteDialog && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowDeleteDialog(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className={`relative w-full max-w-md p-8 rounded-[40px] ${darkMode ? 'bg-gray-900 border border-gray-800' : 'bg-white shadow-2xl'}`}>
+          <div className="admin-modal-overlay">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowDeleteDialog(false)} className="absolute inset-0" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="admin-modal-panel admin-modal-card text-center">
               <div className="h-20 w-20 bg-red-100 text-red-600 rounded-[30px] flex items-center justify-center mx-auto mb-6"><AlertTriangle className="h-10 w-10" /></div>
-              <h3 className="text-2xl font-black text-center mb-2">Delete Member?</h3>
-              <p className="text-center opacity-60 mb-8 font-medium leading-relaxed">This will permanently revoke all system access for this member. This action cannot be reversed.</p>
-              <div className="flex gap-4">
-                <button onClick={() => setShowDeleteDialog(false)} className="flex-1 py-4 rounded-2xl font-black text-sm uppercase tracking-widest bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 transition-all">Cancel</button>
-                <button onClick={confirmDeleteUser} className="flex-1 py-4 rounded-2xl font-black text-sm uppercase tracking-widest bg-red-600 text-white hover:bg-red-700 transition-all">Delete</button>
+              <h3 className="admin-modal-title mb-2">Delete Member?</h3>
+              <p className="admin-modal-subtitle mb-8">This will permanently revoke all system access for this member. This action cannot be reversed.</p>
+              <div className="admin-modal-footer">
+                <Button variant="secondary" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
+                <Button variant="danger" onClick={confirmDeleteUser}>Delete</Button>
               </div>
             </motion.div>
           </div>

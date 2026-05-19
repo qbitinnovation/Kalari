@@ -5,7 +5,8 @@ import { format } from "date-fns";
 import { CalendarDays, Plus, RefreshCw, Ticket, Trash2, User } from "lucide-react";
 import { db, Customer } from "@/lib/database";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { createTicketCode, getRecordId, parseSeatCodes } from "@/lib/booking";
+import { createBookingReference, createTicketCode, getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
+import { Button, Input, Select } from "@/components/ui";
 
 type Activity = {
   id: string;
@@ -31,6 +32,7 @@ type ActivitySlot = {
 type BookingRow = {
   id: string;
   _id?: string;
+  booking_reference?: string;
   show_id: string;
   customer_id?: string;
   booked_by: string;
@@ -111,21 +113,24 @@ export default function ActivityBookingsPage() {
 
     setSaving(true);
     try {
-      const now = new Date().toISOString();
-      const bookedBy = selectedCustomer?.name || "Walk-in customer";
-      const ticketCodes = Array.from({ length: form.ticketCount }).map((_, index) => `ACT-${Date.now()}-${index + 1}`);
-      const { data: createdBookings, error: bookingError } = await db.from("bookings").insert([{
-        show_id: recordId(selectedSlot),
+        const now = new Date().toISOString();
+        const bookedBy = selectedCustomer?.name || "Walk-in customer";
+        const bookingReference = createBookingReference(new Date(now));
+        const ticketCodes = Array.from({ length: form.ticketCount }).map((_, index) => `ACT-${Date.now()}-${index + 1}`);
+        const { data: createdBookings, error: bookingError } = await db.from("bookings").insert([{
+          booking_reference: bookingReference,
+          show_id: recordId(selectedSlot),
         activity_id: selectedSlot.activity_id || form.activityId || null,
         customer_id: selectedCustomer ? recordId(selectedCustomer) : null,
         booked_by: bookedBy,
         seat_code: JSON.stringify(ticketCodes),
         booking_time: now,
         status: "CONFIRMED",
-        payment_method: form.paymentMethod,
-        payment_status: form.paymentMethod === "COD" ? "COD_PENDING" : "PAID",
-        total_amount: totalAmount,
-      }]);
+          payment_method: form.paymentMethod,
+          payment_status: form.paymentMethod === "COD" ? "COD_PENDING" : "PAID",
+          total_amount: totalAmount,
+          cancellation_status: "NONE",
+        }]);
 
       if (bookingError || !createdBookings?.[0]) throw new Error(bookingError?.message || "Could not create activity booking.");
       const bookingId = recordId(createdBookings[0]);
@@ -167,54 +172,75 @@ export default function ActivityBookingsPage() {
           <h1 className={`text-3xl font-semibold ${darkMode ? "text-white" : "text-slate-900"}`}>Activity Bookings</h1>
           <p className={`mt-1 text-sm ${darkMode ? "text-slate-400" : "text-slate-600"}`}>Create and manage non-seat activity bookings.</p>
         </div>
-        <button onClick={fetchData} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white">
+        <Button variant="secondary" onClick={fetchData}>
           <RefreshCw className="h-5 w-5" />
           Refresh
-        </button>
+        </Button>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
         <section className={`rounded-2xl border p-6 shadow-sm ${darkMode ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"}`}>
           <h2 className="mb-5 flex items-center gap-2 text-xl font-black"><Plus className="h-5 w-5" /> New Activity Booking</h2>
           <div className="space-y-4">
-            <Field label="Activity">
-              <select value={form.activityId} onChange={(event) => setForm({ ...form, activityId: event.target.value, slotId: "" })} className="admin-modal-field">
-                <option value="">All activities</option>
-                {activities.map((activity) => <option key={recordId(activity)} value={recordId(activity)}>{activity.title}</option>)}
-              </select>
-            </Field>
-            <Field label="Date Slot">
-              <select value={form.slotId} onChange={(event) => setForm({ ...form, slotId: event.target.value })} className="admin-modal-field">
-                <option value="">Select slot</option>
-                {filteredSlots.map((slot) => (
-                  <option key={recordId(slot)} value={recordId(slot)}>
-                    {slot.title} - {slot.date} {slot.time} - Rs. {slot.price}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Customer (optional)">
-              <select value={form.customerId} onChange={(event) => setForm({ ...form, customerId: event.target.value })} className="admin-modal-field">
-                <option value="">Walk-in customer</option>
-                {customers.map((customer) => <option key={recordId(customer)} value={recordId(customer)}>{customer.name} {customer.phone ? `- ${customer.phone}` : ""}</option>)}
-              </select>
-            </Field>
-            <Field label="Tickets">
-              <input type="number" min={1} value={form.ticketCount} onChange={(event) => setForm({ ...form, ticketCount: Number(event.target.value) })} className="admin-modal-field" />
-            </Field>
-            <Field label="Payment Method">
-              <select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })} className="admin-modal-field">
-                <option value="COD">COD</option>
-                <option value="COUNTER">Counter Paid</option>
-              </select>
-            </Field>
+            <Select
+              label="Activity"
+              value={form.activityId || "__none__"}
+              onChange={(activityId) => setForm({ ...form, activityId: activityId === "__none__" ? "" : activityId, slotId: "" })}
+              placeholder="All activities"
+              options={[
+                { value: "__none__", label: "All activities" },
+                ...activities.map((activity) => ({ value: recordId(activity), label: activity.title })),
+              ]}
+            />
+            <Select
+              label="Date Slot"
+              value={form.slotId || "__none__"}
+              onChange={(slotId) => setForm({ ...form, slotId: slotId === "__none__" ? "" : slotId })}
+              placeholder="Select slot"
+              options={[
+                { value: "__none__", label: "Select slot" },
+                ...filteredSlots.map((slot) => ({
+                  value: recordId(slot),
+                  label: `${slot.title} - ${slot.date} ${slot.time} - Rs. ${slot.price}`,
+                })),
+              ]}
+            />
+            <Select
+              label="Customer (optional)"
+              value={form.customerId || "__none__"}
+              onChange={(customerId) => setForm({ ...form, customerId: customerId === "__none__" ? "" : customerId })}
+              placeholder="Walk-in customer"
+              options={[
+                { value: "__none__", label: "Walk-in customer" },
+                ...customers.map((customer) => ({
+                  value: recordId(customer),
+                  label: `${customer.name}${customer.phone ? ` - ${customer.phone}` : ""}`,
+                })),
+              ]}
+            />
+            <Input
+              label="Tickets"
+              type="number"
+              min={1}
+              value={String(form.ticketCount)}
+              onChange={(value) => setForm({ ...form, ticketCount: Number(value) || 1 })}
+            />
+            <Select
+              label="Payment Method"
+              value={form.paymentMethod}
+              onChange={(paymentMethod) => setForm({ ...form, paymentMethod })}
+              options={[
+                { value: "COD", label: "COD" },
+                { value: "COUNTER", label: "Counter Paid" },
+              ]}
+            />
             <div className="rounded-xl bg-slate-100 p-4 text-slate-950">
               <div className="flex justify-between text-sm"><span>Total</span><strong>Rs. {totalAmount}</strong></div>
               {selectedSlot && <div className="mt-1 flex justify-between text-xs opacity-70"><span>Available</span><span>{Math.max(0, Number(selectedSlot.capacity || 9999) - countBookedTickets(recordId(selectedSlot)))}</span></div>}
             </div>
-            <button onClick={saveBooking} disabled={saving} className="w-full rounded-xl bg-amber-600 px-5 py-3 font-black text-white disabled:opacity-50">
+            <Button onClick={saveBooking} disabled={saving} fullWidth>
               {saving ? "Saving..." : "Create Booking"}
-            </button>
+            </Button>
           </div>
         </section>
 
@@ -251,10 +277,11 @@ export default function ActivityBookingsPage() {
                     })();
                     return (
                       <tr key={recordId(booking)}>
-                        <td className="px-6 py-4">
-                          <div className="font-bold">{booking.show?.title || "Activity"}</div>
-                          <div className="mt-1 flex items-center gap-1 text-xs opacity-60"><CalendarDays className="h-3 w-3" /> {booking.show?.date ? format(new Date(booking.show.date), "MMM dd, yyyy") : "No date"} {booking.show?.time}</div>
-                        </td>
+                          <td className="px-6 py-4">
+                            <div className="font-bold">{booking.show?.title || "Activity"}</div>
+                            <div className="mt-1 font-mono text-xs font-black text-amber-600">{getBookingReference(booking)}</div>
+                            <div className="mt-1 flex items-center gap-1 text-xs opacity-60"><CalendarDays className="h-3 w-3" /> {booking.show?.date ? format(new Date(booking.show.date), "MMM dd, yyyy") : "No date"} {booking.show?.time}</div>
+                          </td>
                         <td className="px-6 py-4"><span className="inline-flex items-center gap-2"><User className="h-4 w-4" /> {booking.customer?.name || booking.booked_by}</span></td>
                         <td className="px-6 py-4"><span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4" /> {ticketCount}</span></td>
                         <td className="px-6 py-4 font-black">Rs. {booking.total_amount || (ticketCount * Number(booking.show?.price || 0))}</td>
@@ -279,9 +306,3 @@ export default function ActivityBookingsPage() {
   );
 }
 
-const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-  <label className="block">
-    <span className="admin-modal-label">{label}</span>
-    {children}
-  </label>
-);

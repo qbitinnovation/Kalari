@@ -5,6 +5,8 @@ import { db, Customer } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { Button, Input, Textarea } from '@/components/ui'
+import { getRecordId } from '@/lib/booking'
 import {
   PlusIcon,
   PencilIcon,
@@ -13,7 +15,8 @@ import {
   EnvelopeIcon,
   PhoneIcon,
   MapPinIcon,
-  MagnifyingGlassIcon
+  MagnifyingGlassIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline'
 
 const Customers: React.FC = () => {
@@ -88,7 +91,7 @@ const Customers: React.FC = () => {
             ...formData,
             updated_at: new Date().toISOString()
           })
-          .eq('id', editingCustomer.id)
+          .eq('id', getRecordId(editingCustomer))
         
         if (error) throw error
       } else {
@@ -131,7 +134,7 @@ const Customers: React.FC = () => {
       const { error } = await db
         .from('customers')
         .delete()
-        .eq('id', customer.id)
+        .eq('id', getRecordId(customer))
       
       if (error) throw error
       await fetchCustomers()
@@ -184,13 +187,10 @@ const Customers: React.FC = () => {
               />
             </div>
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
-          >
-            <PlusIcon className="h-5 w-5 mr-2" />
+          <Button onClick={() => setShowModal(true)}>
+            <PlusIcon className="h-5 w-5" />
             Add Customer
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -234,9 +234,9 @@ const Customers: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${darkMode ? 'divide-slate-700' : 'divide-slate-200'}`}>
-                  {filteredCustomers.map((customer) => (
+                  {filteredCustomers.map((customer, index) => (
                     <motion.tr
-                      key={customer.id}
+                      key={getRecordId(customer) || `customer-row-${index}`}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'} transition-colors duration-200`}
@@ -323,127 +323,83 @@ const Customers: React.FC = () => {
 
       {/* Add/Edit Customer Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm p-4">
+        <div className="admin-modal-overlay">
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className={`rounded-2xl p-6 max-w-md w-full shadow-2xl border transition-colors duration-200 ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}
+            className="admin-modal-panel admin-modal-card"
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className={`text-xl font-semibold ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
-              </h2>
+            <div className="admin-modal-header">
+              <div>
+                <h2 className="admin-modal-title">
+                  {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+                </h2>
+                <p className="admin-modal-subtitle">Keep customer contact details clean for bookings and tickets.</p>
+              </div>
               <button
                 onClick={handleCloseModal}
-                className={`p-2 rounded-lg transition-colors duration-200 ${darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
+                className="admin-modal-close text-[0px]"
+                aria-label="Close modal"
               >
+                <XMarkIcon className="h-5 w-5" />
                 ×
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+              <div className="admin-modal-body space-y-4">
               <div>
-                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Name *
-                </label>
-                <input
-                  type="text"
+                <Input
+                  label="Name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className={`w-full px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                    formErrors.name
-                      ? 'border-red-500 focus:border-red-500'
-                      : darkMode 
-                        ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-slate-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-slate-400'
-                  } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
+                  onChange={(name) => setFormData({ ...formData, name })}
                   placeholder="Enter customer name"
+                  error={formErrors.name}
+                  required
                 />
-                {formErrors.name && (
-                  <p className="text-red-500 text-sm mt-1">{formErrors.name}</p>
-                )}
               </div>
 
               <div>
-                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Email
-                </label>
-                <input
+                <Input
+                  label="Email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className={`w-full px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                    formErrors.email
-                      ? 'border-red-500 focus:border-red-500'
-                      : darkMode 
-                        ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-slate-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-slate-400'
-                  } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
+                  onChange={(email) => setFormData({ ...formData, email })}
                   placeholder="Enter email address"
+                  error={formErrors.email}
                 />
-                {formErrors.email && (
-                  <p className="text-red-500 text-sm mt-1">{formErrors.email}</p>
-                )}
               </div>
 
               <div>
-                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Phone
-                </label>
-                <input
+                <Input
+                  label="Phone"
                   type="tel"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className={`w-full px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                    formErrors.phone
-                      ? 'border-red-500 focus:border-red-500'
-                      : darkMode 
-                        ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-slate-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-slate-400'
-                  } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
                   placeholder="Enter phone number"
+                  error={formErrors.phone}
                 />
-                {formErrors.phone && (
-                  <p className="text-red-500 text-sm mt-1">{formErrors.phone}</p>
-                )}
               </div>
 
               <div>
-                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Address
-                </label>
-                <textarea
+                <Textarea
+                  label="Address"
                   value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  onChange={(address) => setFormData({ ...formData, address })}
                   rows={3}
-                  className={`w-full px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                    darkMode 
-                      ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-slate-500' 
-                      : 'bg-white border-slate-300 text-slate-900 focus:border-slate-400'
-                  } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
                   placeholder="Enter address"
                 />
               </div>
 
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors duration-200 ${darkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
-                >
+              </div>
+
+              <div className="admin-modal-footer">
+                <Button type="button" variant="secondary" onClick={handleCloseModal}>
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors duration-200 ${
-                    submitting 
-                      ? 'opacity-50 cursor-not-allowed' 
-                      : 'hover:bg-primary-700'
-                  } bg-primary-600 text-white`}
-                >
+                </Button>
+                <Button type="submit" disabled={submitting}>
                   {submitting ? 'Saving...' : editingCustomer ? 'Update' : 'Add Customer'}
-                </button>
+                </Button>
               </div>
             </form>
           </motion.div>

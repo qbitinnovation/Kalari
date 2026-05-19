@@ -2,7 +2,9 @@
 
 import React, { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { Button, Input } from '@/components/ui'
 import { db } from '@/lib/database'
+import { getBookingReference } from '@/lib/booking'
 import { format } from 'date-fns'
 import { 
   UserIcon, 
@@ -88,9 +90,9 @@ const Settings: React.FC = () => {
 
       // Create CSV content
       const csvContent = [
-        ['Booking ID', 'Show', 'Date', 'Time', 'Seat', 'Ticket Code', 'Price', 'Status', 'Booking Time'].join(','),
+        ['Booking Ref', 'Show', 'Date', 'Time', 'Seat', 'Ticket Code', 'Price', 'Status', 'Booking Time'].join(','),
         ...(bookings || []).map(booking => [
-          booking.id,
+          getBookingReference(booking),
           booking.show?.title || '',
           booking.show?.date || '',
           booking.show?.time || '',
@@ -170,52 +172,31 @@ const Settings: React.FC = () => {
               <div>
                 <h2 className="text-xl font-semibold text-gray-900 mb-6">Profile Information</h2>
                 <form onSubmit={handleUpdateProfile} className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      value={profileData.name}
-                      onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="Enter your full name"
-                    />
-                  </div>
+                  <Input
+                    label="Full Name"
+                    value={profileData.name}
+                    onChange={(name) => setProfileData({ ...profileData, name })}
+                    placeholder="Enter your full name"
+                  />
+                  <Input
+                    label="Contact Number"
+                    type="tel"
+                    value={profileData.contact}
+                    onChange={(contact) => setProfileData({ ...profileData, contact })}
+                    placeholder="Enter your contact number"
+                  />
+                  <Input
+                    label="Email Address"
+                    type="email"
+                    value={profileData.email}
+                    onChange={() => {}}
+                    disabled
+                    hint="Email cannot be changed"
+                  />
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Contact Number
-                    </label>
-                    <input
-                      type="tel"
-                      value={profileData.contact}
-                      onChange={(e) => setProfileData({ ...profileData, contact: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="Enter your contact number"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      value={profileData.email}
-                      disabled
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Email cannot be changed</p>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-primary-600 text-white py-3 px-6 rounded-xl font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
-                  >
+                  <Button type="submit" disabled={loading}>
                     {loading ? 'Updating...' : 'Update Profile'}
-                  </button>
+                  </Button>
                 </form>
               </div>
             )}
@@ -224,54 +205,31 @@ const Settings: React.FC = () => {
               <div>
                 <h2 className="text-xl font-semibold text-gray-900 mb-6">Change Password</h2>
                 <form onSubmit={handleChangePassword} className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Current Password
-                    </label>
-                    <input
-                      type="password"
-                      value={passwordData.currentPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                      required
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                  </div>
+                  <Input
+                    label="Current Password"
+                    type="password"
+                    value={passwordData.currentPassword}
+                    onChange={(currentPassword) => setPasswordData({ ...passwordData, currentPassword })}
+                    required
+                  />
+                  <Input
+                    label="New Password"
+                    type="password"
+                    value={passwordData.newPassword}
+                    onChange={(newPassword) => setPasswordData({ ...passwordData, newPassword })}
+                    required
+                  />
+                  <Input
+                    label="Confirm New Password"
+                    type="password"
+                    value={passwordData.confirmPassword}
+                    onChange={(confirmPassword) => setPasswordData({ ...passwordData, confirmPassword })}
+                    required
+                  />
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      New Password
-                    </label>
-                    <input
-                      type="password"
-                      value={passwordData.newPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                      required
-                      minLength={6}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Confirm New Password
-                    </label>
-                    <input
-                      type="password"
-                      value={passwordData.confirmPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                      required
-                      minLength={6}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-primary-600 text-white py-3 px-6 rounded-xl font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
-                  >
+                  <Button type="submit" disabled={loading}>
                     {loading ? 'Updating...' : 'Change Password'}
-                  </button>
+                  </Button>
                 </form>
               </div>
             )}
@@ -285,14 +243,10 @@ const Settings: React.FC = () => {
                     <p className="text-gray-600 mb-4">
                       Export all booking data including show details, seat information, and ticket status.
                     </p>
-                    <button
-                      onClick={handleExportReport}
-                      disabled={loading}
-                      className="bg-primary-600 text-white py-3 px-6 rounded-xl font-medium hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center"
-                    >
-                      <DocumentArrowDownIcon className="h-5 w-5 mr-2" />
+                    <Button onClick={handleExportReport} disabled={loading}>
+                      <DocumentArrowDownIcon className="h-5 w-5" />
                       {loading ? 'Exporting...' : 'Export CSV'}
-                    </button>
+                    </Button>
                   </div>
 
                   <div className="border border-gray-200 rounded-xl p-6">

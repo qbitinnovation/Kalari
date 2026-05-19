@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logActivity } from '@/utils/activityLogger'
+import { Button, DateRangePicker } from '@/components/ui'
 
 interface AnalyticsData {
   totalRevenue: number
@@ -639,39 +640,18 @@ const Analytics: React.FC = () => {
         {/* Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           {/* Date Range */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <input
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-              className={`w-full sm:w-auto px-3 py-2 border rounded-lg text-sm transition-colors duration-200 ${
-                darkMode 
-                  ? 'bg-gray-800 border-gray-600 text-white' 
-                  : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-            <span className={`text-sm text-center sm:text-left transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>to</span>
-            <input
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-              className={`w-full sm:w-auto px-3 py-2 border rounded-lg text-sm transition-colors duration-200 ${
-                darkMode 
-                  ? 'bg-gray-800 border-gray-600 text-white' 
-                  : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
+          <DateRangePicker
+            start={dateRange.start}
+            end={dateRange.end}
+            onChange={setDateRange}
+          />
 
           {/* Export */}
           <div className="flex justify-center sm:justify-start">
-            <button
-              onClick={async () => await exportData('csv')}
-              className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 text-sm"
-            >
+            <Button size="sm" onClick={async () => await exportData('csv')}>
               <ArrowDownTrayIcon className="h-4 w-4" />
-              <span>CSV</span>
-            </button>
+              CSV
+            </Button>
           </div>
         </div>
       </div>

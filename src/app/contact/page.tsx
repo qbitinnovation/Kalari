@@ -5,6 +5,7 @@ import PublicNavbar from '@/components/PublicNavbar'
 import { PublicFooter } from '@/components/PublicFooter'
 import { motion } from 'framer-motion'
 import { Mail, Phone, MapPin, Send, MessageSquare, Instagram, Facebook, Twitter, CheckCircle2 } from 'lucide-react'
+import { Input, Textarea } from '@/components/ui'
 
 const Contact: React.FC = () => {
   const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' })
@@ -90,50 +91,45 @@ const Contact: React.FC = () => {
                   ) : (
                     <form onSubmit={handleSubmit} className="space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                          <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-2">Full Name</label>
-                          <input 
-                            required
-                            type="text" 
-                            placeholder="John Doe" 
-                            value={form.name}
-                            onChange={e => setForm({...form, name: e.target.value})}
-                            className="w-full px-5 py-4 rounded-2xl border-2 border-stone-100 focus:border-amber-400 outline-none transition-colors font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-2">Email Address</label>
-                          <input 
-                            required
-                            type="email" 
-                            placeholder="john@example.com" 
-                            value={form.email}
-                            onChange={e => setForm({...form, email: e.target.value})}
-                            className="w-full px-5 py-4 rounded-2xl border-2 border-stone-100 focus:border-amber-400 outline-none transition-colors font-bold"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-2">Phone Number</label>
-                        <input 
-                          type="tel" 
-                          placeholder="+91 98765 43210" 
-                          value={form.phone}
-                          onChange={e => setForm({...form, phone: e.target.value})}
-                          className="w-full px-5 py-4 rounded-2xl border-2 border-stone-100 focus:border-amber-400 outline-none transition-colors font-bold"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-2">Your Message</label>
-                        <textarea 
+                        <Input
+                          variant="public"
+                          label="Full Name"
+                          value={form.name}
+                          onChange={(name) => setForm({ ...form, name })}
+                          placeholder="John Doe"
                           required
-                          rows={6}
-                          placeholder="How can we help you?" 
-                          value={form.message}
-                          onChange={e => setForm({...form, message: e.target.value})}
-                          className="w-full px-5 py-4 rounded-2xl border-2 border-stone-100 focus:border-amber-400 outline-none transition-colors font-bold resize-none"
+                          inputClassName="rounded-2xl border-2 border-stone-100 px-5 py-4 font-bold"
+                        />
+                        <Input
+                          variant="public"
+                          label="Email Address"
+                          type="email"
+                          value={form.email}
+                          onChange={(email) => setForm({ ...form, email })}
+                          placeholder="john@example.com"
+                          required
+                          inputClassName="rounded-2xl border-2 border-stone-100 px-5 py-4 font-bold"
                         />
                       </div>
+                      <Input
+                        variant="public"
+                        label="Phone Number"
+                        type="tel"
+                        value={form.phone}
+                        onChange={(phone) => setForm({ ...form, phone })}
+                        placeholder="+91 98765 43210"
+                        inputClassName="rounded-2xl border-2 border-stone-100 px-5 py-4 font-bold"
+                      />
+                      <Textarea
+                        variant="public"
+                        label="Your Message"
+                        value={form.message}
+                        onChange={(message) => setForm({ ...form, message })}
+                        rows={6}
+                        placeholder="How can we help you?"
+                        required
+                        inputClassName="rounded-2xl border-2 border-stone-100 px-5 py-4 font-bold resize-none"
+                      />
                       <button 
                         disabled={loading}
                         type="submit" 

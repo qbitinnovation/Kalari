@@ -189,6 +189,7 @@ export interface Customer {
 export interface Booking {
   id: string;
   _id?: string;
+  booking_reference?: string;
   show_id: string;
   seat_id?: string;
   seat_code: string;
@@ -204,6 +205,10 @@ export interface Booking {
   total_amount?: number;
   booking_time: string;
   status: "CONFIRMED" | "CANCELLED";
+  cancellation_requested?: boolean;
+  cancellation_reason?: string;
+  cancellation_requested_at?: string;
+  cancellation_status?: "NONE" | "PENDING" | "APPROVED" | "REJECTED";
   customer?: Customer;
   show?: Show;
 }

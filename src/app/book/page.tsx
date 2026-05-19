@@ -20,14 +20,17 @@ import {
 } from 'lucide-react'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { db } from '@/lib/database'
+import { Input } from '@/components/ui'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
   alignClassForArenaSide,
   groupSeatsByArenaSide,
+  getSymmetricArenaSections,
+  sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
-import { createTicketCode, getAvailabilityLabel, getRecordId, parseSeatCodes } from '@/lib/booking'
+import { createBookingReference, createTicketCode, getAvailabilityLabel, getRecordId, parseSeatCodes } from '@/lib/booking'
 
 const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ''
 
@@ -109,6 +112,7 @@ const BookingContent: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
   const [bookingId, setBookingId] = useState('')
+  const [bookingReference, setBookingReference] = useState('')
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'COD_PENDING'>('PAID')
   const [ticketCodes, setTicketCodes] = useState<string[]>([])
   const [showsLoading, setShowsLoading] = useState(true)
@@ -171,7 +175,7 @@ const BookingContent: React.FC = () => {
     if (!selectedShow?.layout?.structure?.sections) return []
     const generated: SeatOption[] = []
 
-    selectedShow.layout.structure.sections.forEach((section: any) => {
+    getSymmetricArenaSections(selectedShow.layout.structure.sections).forEach((section: any) => {
       const sectionName = String(section.name || 'Main')
       const prefix = sectionName.charAt(0).toUpperCase()
 
@@ -240,19 +244,41 @@ const BookingContent: React.FC = () => {
 
   const renderGuestSeatGroup = (rows: SeatOption[][], side: ArenaSide) => {
     if (rows.length === 0) return null
-    return (
-      <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
-        {side === 'top' && (
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-800">{ARENA_TOP_LABEL}</h3>
-            <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-stone-500 ring-1 ring-stone-200">
-              {arrowForArenaSide(side)}
+    const isSide = side === 'left' || side === 'right'
+    const sideRows = isSide && side === 'left' ? [...rows].reverse() : rows
+    const maxSeatsInSide = isSide ? Math.max(...sideRows.map(row => row.length)) : 0
+
+    const renderSideColumns = () => (
+      <div
+        className="grid h-full content-center justify-center gap-2"
+        style={{ gridTemplateColumns: `repeat(${sideRows.length}, minmax(36px, 44px))` }}
+      >
+        {sideRows.map((rowSeats, rowIndex) => (
+          <div key={`${side}-${rowSeats[0]?.row || rowIndex}`} className="flex flex-col items-center gap-2">
+            <span className="text-center text-xs font-bold text-stone-400">
+              {rowSeats[0]?.row || String.fromCharCode(65 + rowIndex)}
             </span>
+            {Array.from({ length: maxSeatsInSide }, (_, seatIndex) => {
+              const seat = rowSeats[seatIndex]
+              return seat ? renderSeatButton(seat) : <span key={`${side}-${rowIndex}-${seatIndex}`} className="h-8 w-9" />
+            })}
           </div>
-        )}
-        <div className="overflow-x-auto">
-          <div className="min-w-max space-y-2">
-            {rows.map((rowSeats, index) => (
+        ))}
+      </div>
+    )
+
+    return (
+      <div className="rounded-lg border border-stone-200 bg-white/80 p-3 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-xs font-black uppercase tracking-wider text-stone-500">{sideLabelForArenaSide(side)}</h3>
+          <span className="rounded-full bg-stone-100 px-2 py-1 text-xs font-black text-stone-600 ring-1 ring-stone-200">
+            {arrowForArenaSide(side)}
+          </span>
+        </div>
+        <div className="overflow-x-auto pb-1">
+          {isSide ? renderSideColumns() : (
+            <div className="mx-auto min-w-max space-y-2">
+              {rows.map((rowSeats, index) => (
               <div
                 key={`${side}-${rowSeats[0]?.row || index}`}
                 className={`flex items-center gap-2 ${alignClassForArenaSide(side)}`}
@@ -262,20 +288,35 @@ const BookingContent: React.FC = () => {
                 </span>
                 {rowSeats.map(renderSeatButton)}
               </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     )
   }
 
   const renderGuestKalariSeatMap = () => {
+    const renderArenaCenter = () => (
+      <div className="flex flex-col items-center justify-center gap-3">
+          <div className="relative flex aspect-square w-[390px] items-center justify-center overflow-hidden rounded-lg border-4 border-[#8b5a2b]/30 bg-[#b8793b] shadow-inner">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#d6a15f_0%,#b8793b_42%,#8b5a2b_100%)]" />
+          <div className="absolute inset-4 rounded-lg border border-[#f3d6a3]/35" />
+          <div className="absolute h-[72%] w-1.5 rotate-45 rounded-full bg-[#6f3f1c]/45" />
+          <div className="absolute h-[72%] w-1.5 -rotate-45 rounded-full bg-[#6f3f1c]/45" />
+          <div className="absolute h-16 w-16 rounded-full border-2 border-[#f3d6a3]/40" />
+          <div className="absolute h-3 w-3 rounded-full bg-[#f3d6a3]/80" />
+        </div>
+        <div className="text-center text-xs font-black uppercase tracking-widest text-stone-500">Ankathattu</div>
+      </div>
+    )
+
     return (
       <div className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-stone-200">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-stone-950">Kalari arena seating</h3>
-            <p className="mt-1 text-sm font-medium text-stone-500">Seats face the center performance space.</p>
+            <p className="mt-1 text-sm font-medium text-stone-500">{ARENA_TOP_LABEL} performance square.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-bold">
             <span className="rounded-full bg-white px-3 py-1 text-stone-600 ring-1 ring-stone-200">Available</span>
@@ -284,16 +325,14 @@ const BookingContent: React.FC = () => {
           </div>
         </div>
         <div className="overflow-x-auto pb-2">
-          <div className="min-w-[560px] space-y-5 rounded-2xl bg-[#f7f3eb] p-4">
-            {renderGuestSeatGroup(arenaSeatGroups.top, 'top')}
-            <div className="grid grid-cols-[1fr_112px_1fr] items-center gap-4">
-              <div>{renderGuestSeatGroup(arenaSeatGroups.left, 'left')}</div>
-              <div className="flex h-28 w-28 items-center justify-center rounded-2xl border-4 border-stone-300 bg-stone-950 text-center text-[9px] font-black uppercase tracking-[0.18em] text-white shadow-inner">
-                Kalari<br />Performance
-              </div>
-              <div>{renderGuestSeatGroup(arenaSeatGroups.right, 'right')}</div>
+          <div className="min-w-[1040px] space-y-5 rounded-lg bg-[#f7f3eb] p-5 ring-1 ring-stone-200">
+            <div>{renderGuestSeatGroup(arenaSeatGroups.top, 'top')}</div>
+            <div className="grid grid-cols-[260px_430px_260px] items-center justify-center gap-5">
+              <div className="self-stretch">{renderGuestSeatGroup(arenaSeatGroups.left, 'left')}</div>
+              {renderArenaCenter()}
+              <div className="self-stretch">{renderGuestSeatGroup(arenaSeatGroups.right, 'right')}</div>
             </div>
-            {renderGuestSeatGroup(arenaSeatGroups.bottom, 'bottom')}
+            <div>{renderGuestSeatGroup(arenaSeatGroups.bottom, 'bottom')}</div>
           </div>
         </div>
       </div>
@@ -372,6 +411,7 @@ const BookingContent: React.FC = () => {
 
     const customerId = await findOrCreateCustomer()
     const now = new Date().toISOString()
+    const bookingReference = createBookingReference(new Date(now))
     
     let seatCodesToSave = selectedSeats
     if (selectedShow.type === 'EVENT') {
@@ -379,6 +419,7 @@ const BookingContent: React.FC = () => {
     }
 
     const { data: bookings, error: bookingError } = await db.from('bookings').insert([{
+      booking_reference: bookingReference,
       show_id: getRecordId(selectedShow),
       seat_code: JSON.stringify(seatCodesToSave),
       booked_by: form.name.trim(),
@@ -391,6 +432,7 @@ const BookingContent: React.FC = () => {
       payment_method: method === 'cod' ? 'COD' : 'RAZORPAY',
       payment_status: status,
       total_amount: totalAmount,
+      cancellation_status: 'NONE',
     }])
 
     if (bookingError || !bookings?.[0]) throw new Error(bookingError?.message || 'Booking could not be saved.')
@@ -411,6 +453,7 @@ const BookingContent: React.FC = () => {
 
     if (ticketError) throw new Error(ticketError.message || 'Tickets could not be created.')
     setBookingId(savedBookingId)
+    setBookingReference(bookingReference)
     setTicketCodes(generatedTickets.map(ticket => ticket.ticket_code))
     setPaymentStatus(status)
     setStep('success')
@@ -616,26 +659,39 @@ const BookingContent: React.FC = () => {
                 <Summary show={selectedShow} selectedSeatLabels={selectedSeatLabels} selectedSeats={totalTickets} totalAmount={totalAmount} />
                 <div className="rounded-lg bg-white p-5 shadow-sm ring-1 ring-stone-200">
                   <label className="mb-4 block">
-                    <span className="mb-2 block text-sm font-bold">Full name</span>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-stone-400" />
-                      <input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className={`w-full rounded-lg border py-3 pl-11 pr-4 outline-none focus:ring-2 focus:ring-amber-400 ${errors.name ? 'border-red-300' : 'border-stone-200'}`} placeholder="Guest name" />
-                    </div>
-                    {errors.name && <p className="mt-1 text-sm font-bold text-red-600">{errors.name}</p>}
+                    <Input
+                      variant="public"
+                      label="Full name"
+                      value={form.name}
+                      onChange={(name) => setForm({ ...form, name })}
+                      placeholder="Guest name"
+                      leftIcon={User}
+                      error={errors.name}
+                    />
                   </label>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label>
-                      <span className="mb-2 block text-sm font-bold">Phone</span>
-                      <div className="relative">
-                        <Phone className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-stone-400" />
-                        <input type="tel" value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} className={`w-full rounded-lg border py-3 pl-11 pr-4 outline-none focus:ring-2 focus:ring-amber-400 ${errors.phone ? 'border-red-300' : 'border-stone-200'}`} placeholder="+91 98765 43210" />
-                      </div>
-                      {errors.phone && <p className="mt-1 text-sm font-bold text-red-600">{errors.phone}</p>}
+                      <Input
+                        variant="public"
+                        label="Phone"
+                        type="tel"
+                        value={form.phone}
+                        onChange={(phone) => setForm({ ...form, phone })}
+                        placeholder="+91 98765 43210"
+                        leftIcon={Phone}
+                        error={errors.phone}
+                      />
                     </label>
                     <label>
-                      <span className="mb-2 block text-sm font-bold">Email optional</span>
-                      <input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} className={`w-full rounded-lg border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 ${errors.email ? 'border-red-300' : 'border-stone-200'}`} placeholder="name@email.com" />
-                      {errors.email && <p className="mt-1 text-sm font-bold text-red-600">{errors.email}</p>}
+                      <Input
+                        variant="public"
+                        label="Email optional"
+                        type="email"
+                        value={form.email}
+                        onChange={(email) => setForm({ ...form, email })}
+                        placeholder="name@email.com"
+                        error={errors.email}
+                      />
                     </label>
                   </div>
                 </div>
@@ -669,7 +725,7 @@ const BookingContent: React.FC = () => {
                 <h2 className="mt-5 text-3xl font-bold">Booking confirmed</h2>
                 <p className="mt-2 text-stone-600">Show this confirmation at the venue.</p>
                 <div className="mt-6 grid gap-3 rounded-lg bg-stone-50 p-4 text-left text-sm sm:grid-cols-2">
-                  <Info label="Booking ID" value={bookingId} mono />
+                  <Info label="Booking Ref" value={bookingReference || bookingId} mono />
                   <Info label="Payment" value={paymentStatus === 'PAID' ? 'Paid via Razorpay' : 'COD pending'} />
                   <Info label="Guest" value={form.name} />
                   <Info label="Total" value={`Rs. ${totalAmount}`} />
@@ -677,7 +733,7 @@ const BookingContent: React.FC = () => {
                   {ticketCodes.length > 0 && <div className="sm:col-span-2"><Info label="Ticket Codes" value={ticketCodes.join(', ')} mono /></div>}
                 </div>
                 <div className="mx-auto mt-6 flex w-fit rounded-lg bg-white p-3 shadow-sm">
-                  <QRCode value={bookingId} size={132} />
+                  <QRCode value={bookingReference || bookingId} size={132} />
                 </div>
                 <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
                   <button onClick={() => window.print()} className="rounded-lg bg-emerald-700 px-6 py-3 font-bold text-white">Print ticket</button>

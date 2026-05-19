@@ -12,6 +12,9 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
+import { getBookingReference } from '@/lib/booking'
+import { Button } from '@/components/ui'
+import { DatePicker } from '@/components/ui'
 
 interface TicketWithDetails extends Ticket {
   show?: {
@@ -20,6 +23,9 @@ interface TicketWithDetails extends Ticket {
     time: string
   }
   booking?: {
+    id?: string
+    _id?: string
+    booking_reference?: string
     customer_id: string
     agent_id?: string
     customer?: {
@@ -33,6 +39,7 @@ interface TicketWithDetails extends Ticket {
 
 interface BookingGroup {
   booking_id: string
+  booking_reference: string
   show?: {
     title: string
     date: string
@@ -105,6 +112,7 @@ const Tickets: React.FC = () => {
         if (!groupedBookings[ticket.booking_id]) {
           groupedBookings[ticket.booking_id] = {
             booking_id: ticket.booking_id,
+            booking_reference: getBookingReference(ticket.booking || { id: ticket.booking_id }),
             show: ticket.show,
             tickets: [],
             total_price: 0,
@@ -139,6 +147,7 @@ const Tickets: React.FC = () => {
   const filteredBookings = bookings.filter(booking => {
     const matchesSearch = 
       booking.booking_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      booking.booking_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.show?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.seat_codes.some(code => code.toLowerCase().includes(searchTerm.toLowerCase())) ||
       booking.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -154,7 +163,7 @@ const Tickets: React.FC = () => {
 
   const handlePrintBooking = (booking: BookingGroup) => {
     // Use the same QR code API as a reliable source
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(booking.booking_id)}`
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(booking.booking_reference)}`
     
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
@@ -163,7 +172,7 @@ const Tickets: React.FC = () => {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Booking Ticket - ${booking.booking_id}</title>
+          <title>Booking Ticket - ${booking.booking_reference}</title>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
           <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -316,7 +325,7 @@ const Tickets: React.FC = () => {
               </div>
 
               <div class="footer">
-                <div>Booking ID: ${booking.booking_id.slice(0, 8)}...</div>
+                <div>Booking Ref: ${booking.booking_reference}</div>
                 <div>Generated: ${format(new Date(booking.generated_at), 'MMM dd, yyyy h:mm a')}</div>
               </div>
             </div>
@@ -362,43 +371,17 @@ const Tickets: React.FC = () => {
       <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
         <h2 className={`text-lg font-medium mb-4 transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>Filter by Generated Date</h2>
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-          <div className="flex-1">
-            <label className={`block text-sm font-medium mb-2 transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-              Select Generated Date
-            </label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className={`w-full px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                darkMode 
-                  ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-slate-500' 
-                  : 'bg-white border-slate-300 text-slate-900 focus:border-slate-400'
-              } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setSelectedDate('')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                darkMode
-                  ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              Clear Filter
-            </button>
-            <button
-              onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                darkMode
-                  ? 'bg-primary-600 text-white hover:bg-primary-700'
-                  : 'bg-primary-600 text-white hover:bg-primary-700'
-              }`}
-            >
-              Today
-            </button>
-          </div>
+          <DatePicker
+            label="Select Generated Date"
+            value={selectedDate}
+            onChange={setSelectedDate}
+            placeholder="All dates"
+            presets={[
+              { label: 'Clear Filter', value: 'clear' },
+              { label: 'Today', value: 'today' },
+            ]}
+            className="flex-1"
+          />
         </div>
         
         {/* Show count and selected date info */}
@@ -458,7 +441,7 @@ const Tickets: React.FC = () => {
               <thead className={`transition-colors duration-200 ${darkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
                 <tr>
                   <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Booking ID
+                    Booking Ref
                   </th>
                   <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Show
@@ -491,7 +474,7 @@ const Tickets: React.FC = () => {
                   <tr key={booking.booking_id} className={`transition-colors duration-200 ${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}`}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className={`text-sm font-mono transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {booking.booking_id.slice(0, 8)}...
+                        {booking.booking_reference}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -609,25 +592,26 @@ const Tickets: React.FC = () => {
 
       {/* Preview Modal */}
       {showPreview && selectedBooking && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-hidden">
-          <div className={`max-w-md w-full max-h-[90vh] overflow-y-auto rounded-2xl shadow-xl transition-colors duration-200 ${darkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white'}`}>
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <h3 className={`text-lg font-semibold transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                  Ticket Preview
-                </h3>
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-panel admin-modal-card">
+              <div className="admin-modal-header">
+                <div>
+                  <h3 className="admin-modal-title">Ticket Preview</h3>
+                  <p className="admin-modal-subtitle">Review QR ticket details before printing.</p>
+                </div>
                 <button
                   onClick={() => {
                     setShowPreview(false)
                     setSelectedBooking(null)
                   }}
-                  className={`p-2 rounded-lg transition-colors duration-200 ${darkMode ? 'text-slate-400 hover:text-slate-300 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
+                  className="admin-modal-close"
+                  aria-label="Close modal"
                 >
                   <XMarkIcon className="h-5 w-5" />
                 </button>
               </div>
 
+            <div className="admin-modal-body">
               {/* Ticket Content */}
               <div className={`border-2 border-dashed p-4 rounded-xl transition-colors duration-200 ${darkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-300 bg-slate-50'}`}>
                 <div className="text-center mb-4">
@@ -684,7 +668,7 @@ const Tickets: React.FC = () => {
                 {/* QR Code */}
                 <div className="text-center mb-4">
                   <QRCode
-                    value={selectedBooking.booking_id}
+                    value={selectedBooking.booking_reference}
                     size={120}
                     bgColor={darkMode ? '#1e293b' : '#ffffff'}
                     fgColor={darkMode ? '#f1f5f9' : '#000000'}
@@ -694,7 +678,7 @@ const Tickets: React.FC = () => {
 
                 <div className="text-center text-xs space-y-1">
                   <div className={`transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Booking ID: {selectedBooking.booking_id.slice(0, 8)}...
+                    Booking Ref: {selectedBooking.booking_reference}
                   </div>
                   <div className={`transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Generated: {format(new Date(selectedBooking.generated_at), 'MMM dd, yyyy h:mm a')}
@@ -702,30 +686,29 @@ const Tickets: React.FC = () => {
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex gap-3 mt-6">
-                <button
+            </div>
+
+              <div className="admin-modal-footer">
+                <Button
                   onClick={() => {
                     handlePrintBooking(selectedBooking)
                     setShowPreview(false)
                     setSelectedBooking(null)
                   }}
-                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium transition-colors duration-200 ${darkMode ? 'bg-green-900/20 text-green-400 border border-green-800 hover:bg-green-900/30' : 'bg-green-100 text-green-800 hover:bg-green-200'}`}
                 >
                   <PrinterIcon className="h-4 w-4" />
                   Print
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     setShowPreview(false)
                     setSelectedBooking(null)
                   }}
-                  className={`flex-1 px-4 py-2 rounded-xl font-medium transition-colors duration-200 ${darkMode ? 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                 >
                   Close
-                </button>
+                </Button>
               </div>
-            </div>
           </div>
         </div>
       )}

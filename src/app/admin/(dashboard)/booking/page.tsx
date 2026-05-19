@@ -6,15 +6,19 @@ import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logBookingCreation } from '@/utils/activityLogger'
-import { createTicketCode, getRecordId, parseSeatCodes } from '@/lib/booking'
+import { createBookingReference, createTicketCode, getBookingReference, getRecordId, parseSeatCodes } from '@/lib/booking'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
   alignClassForArenaSide,
   groupSeatsByArenaSide,
+  getSymmetricArenaSections,
+  sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
 import { useAuth } from '@/contexts/AuthContext'
+import { X } from 'lucide-react'
+import { Button, DatePicker } from '@/components/ui'
 
 interface SeatData {
   id: string
@@ -205,7 +209,7 @@ const Booking: React.FC = () => {
       if (!show?.layout) return
       const generatedSeats: SeatData[] = []
 
-      show.layout.structure.sections?.forEach((section: any) => {
+      getSymmetricArenaSections(show.layout.structure.sections || []).forEach((section: any) => {
         const sectionPrefix = section.name.charAt(0).toUpperCase()
         if (section.rows && Array.isArray(section.rows)) {
           section.rows.forEach((rowConfig: any, rowIndex: number) => {
@@ -282,8 +286,10 @@ const Booking: React.FC = () => {
 
       const agent = agents.find(a => recordId(a) === selectedAgentId)
       const commissionAmount = agent ? (getTotalAmount() * (agent.commission_percentage || 0)) / 100 : 0
+      const bookingReference = createBookingReference()
 
       const bookingToInsert = {
+        booking_reference: bookingReference,
         show_id: recordId(selectedShow),
         seat_code: JSON.stringify(selectedSeats),
         booked_by: selectedCustomer.name,
@@ -294,15 +300,17 @@ const Booking: React.FC = () => {
         payment_status: 'PAID',
         total_amount: getTotalAmount(),
         booking_time: new Date().toISOString(),
-        status: 'CONFIRMED'
+        status: 'CONFIRMED',
+        cancellation_status: 'NONE'
       }
 
       const { data: bookings, error: bookingError } = await db.from('bookings').insert([bookingToInsert]).select()
       if (bookingError) throw bookingError
       const booking = bookings[0]
+      const bookingId = recordId(booking)
 
       const ticketsToInsert = selectedSeats.map(seatCode => ({
-        booking_id: booking.id, show_id: recordId(selectedShow), seat_code: seatCode,
+        booking_id: bookingId, show_id: recordId(selectedShow), seat_code: seatCode,
         ticket_code: createTicketCode(),
         price: selectedShow.price || 100, generated_by: 'admin', generated_at: new Date().toISOString(), status: 'ACTIVE'
       }))
@@ -311,8 +319,8 @@ const Booking: React.FC = () => {
       if (ticketError) throw ticketError
 
       const { data: { user } } = await db.auth.getUser()
-      await logBookingCreation(booking.id, selectedShow.title, user?.email || 'unknown', {
-        seat_codes: selectedSeats, total_price: getTotalAmount(), agent_name: agent?.full_name
+      await logBookingCreation(bookingId, selectedShow.title, user?.email || 'unknown', {
+        booking_reference: getBookingReference(booking), seat_codes: selectedSeats, total_price: getTotalAmount(), agent_name: agent?.full_name
       })
 
       setBookingResult({ bookings, tickets, success: true, totalAmount: getTotalAmount() })
@@ -356,18 +364,37 @@ const Booking: React.FC = () => {
 
   const renderArenaSide = (rows: SeatData[][], side: ArenaSide) => {
     if (rows.length === 0) return null
-    const borderTone =
-      side === 'top' ? 'border-blue-500/30' : side === 'right' ? 'border-purple-500/30' : side === 'bottom' ? 'border-orange-500/30' : 'border-emerald-500/30'
-    return (
-      <div className={`rounded-2xl border-2 border-dashed p-4 ${borderTone}`}>
-        {side === 'top' && (
-          <div className="mb-4 flex items-center justify-center gap-3 text-sm font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
-            <span>{ARENA_TOP_LABEL}</span>
-            <span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800">{arrowForArenaSide(side)}</span>
+    const isSide = side === 'left' || side === 'right'
+    const sideRows = isSide && side === 'left' ? [...rows].reverse() : rows
+    const maxSeatsInSide = isSide ? Math.max(...sideRows.map(row => row.length)) : 0
+
+    const renderSideColumns = () => (
+      <div
+        className="grid h-full content-center justify-center gap-2"
+        style={{ gridTemplateColumns: `repeat(${sideRows.length}, minmax(36px, 44px))` }}
+      >
+        {sideRows.map((rowSeats, rowIndex) => (
+          <div key={`${side}-${rowSeats[0]?.seatName || rowIndex}`} className="flex flex-col items-center gap-2">
+            <span className="text-[10px] font-bold opacity-30">
+              {rowSeats[0]?.seatName?.charAt(1) || String.fromCharCode(65 + rowIndex)}
+            </span>
+            {Array.from({ length: maxSeatsInSide }, (_, seatIndex) => {
+              const seat = rowSeats[seatIndex]
+              return seat ? renderAdminSeatButton(seat) : <span key={`${side}-${rowIndex}-${seatIndex}`} className="h-8 w-9" />
+            })}
           </div>
-        )}
-        <div className="space-y-2">
-          {rows.map((rowSeats, index) => (
+        ))}
+      </div>
+    )
+
+    return (
+      <div className={`h-full rounded-lg border border-slate-200 bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/80`}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">{sideLabelForArenaSide(side)}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">{arrowForArenaSide(side)}</span>
+        </div>
+        <div className="space-y-2 overflow-x-auto pb-1">
+          {isSide ? renderSideColumns() : rows.map((rowSeats, index) => (
             <motion.div
               key={`${side}-${rowSeats[0]?.seatName || index}`}
               className={`flex items-center gap-1 ${alignClassForArenaSide(side)}`}
@@ -411,18 +438,30 @@ const Booking: React.FC = () => {
   const renderRectangularSeatMap = () => {
     if (!selectedShow?.layout) return null
     const arenaGroups = groupSeatsByArenaSide(seats, getRowsForSection)
+    const renderArenaCenter = () => (
+      <div className="flex flex-col items-center justify-center gap-3">
+          <div className="relative flex aspect-square w-[390px] items-center justify-center overflow-hidden rounded-lg border-4 border-[#8b5a2b]/30 bg-[#b8793b] shadow-inner">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#d6a15f_0%,#b8793b_42%,#8b5a2b_100%)]" />
+          <div className="absolute inset-4 rounded-lg border border-[#f3d6a3]/35" />
+          <div className="absolute h-[72%] w-1.5 rotate-45 rounded-full bg-[#6f3f1c]/45" />
+          <div className="absolute h-[72%] w-1.5 -rotate-45 rounded-full bg-[#6f3f1c]/45" />
+          <div className="absolute h-16 w-16 rounded-full border-2 border-[#f3d6a3]/40" />
+          <div className="absolute h-3 w-3 rounded-full bg-[#f3d6a3]/80" />
+        </div>
+        <div className="text-center text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Ankathattu</div>
+      </div>
+    )
 
     return (
-      <div className="min-w-[620px] space-y-5 rounded-3xl bg-slate-50 p-5 dark:bg-slate-950/40">
-        {renderArenaSide(arenaGroups.top, 'top')}
-        <div className="grid grid-cols-[1fr_120px_1fr] items-center gap-5">
-          <div className="w-full">{renderArenaSide(arenaGroups.left, 'left')}</div>
-          <div className={`flex h-28 w-28 items-center justify-center rounded-3xl border-4 border-slate-500/20 shadow-inner ${darkMode ? 'bg-slate-800' : 'bg-white'}`}>
-             <div className="text-center text-[9px] font-black uppercase tracking-[0.18em] opacity-40">Kalari<br/>Performance</div>
-          </div>
-          <div className="w-full">{renderArenaSide(arenaGroups.right, 'right')}</div>
+      <div className="min-w-[1040px] space-y-5 rounded-lg bg-slate-50 p-5 ring-1 ring-slate-200 dark:bg-slate-950/40 dark:ring-slate-800">
+        <div className="text-center text-xs font-black uppercase tracking-widest text-slate-400">{ARENA_TOP_LABEL}</div>
+        <div>{renderArenaSide(arenaGroups.top, 'top')}</div>
+        <div className="grid grid-cols-[260px_430px_260px] items-center justify-center gap-5">
+          <div className="h-full">{renderArenaSide(arenaGroups.left, 'left')}</div>
+          {renderArenaCenter()}
+          <div className="h-full">{renderArenaSide(arenaGroups.right, 'right')}</div>
         </div>
-        {renderArenaSide(arenaGroups.bottom, 'bottom')}
+        <div>{renderArenaSide(arenaGroups.bottom, 'bottom')}</div>
       </div>
     )
   }
@@ -443,11 +482,11 @@ const Booking: React.FC = () => {
                 <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
                 Select Date
               </h2>
-              <input
-                type="date"
+              <DatePicker
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className={`w-full p-4 rounded-2xl border font-bold outline-none transition-all ${darkMode ? 'bg-slate-800 border-slate-700 focus:border-amber-500' : 'bg-slate-50 border-slate-200 focus:border-amber-500'}`}
+                onChange={setSelectedDate}
+                placeholder="Select date"
+                triggerClassName={`font-bold ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
               />
               <div className="mt-4 flex flex-wrap gap-2">
                 {getAvailableDates().map(d => (
@@ -495,9 +534,9 @@ const Booking: React.FC = () => {
                         <div className="text-[10px] font-black uppercase tracking-widest opacity-40">Total Amount</div>
                         <div className="text-2xl font-black text-amber-600">₹{getTotalAmount()}</div>
                       </div>
-                      <button onClick={handleContinueBooking} className="bg-amber-600 text-white px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-amber-700 shadow-xl shadow-amber-600/20 active:scale-95 transition-all">
+                      <Button onClick={handleContinueBooking} size="lg" className="uppercase tracking-widest">
                         Checkout ({selectedSeats.length})
-                      </button>
+                      </Button>
                     </motion.div>
                   )}
                 </div>
@@ -518,12 +557,20 @@ const Booking: React.FC = () => {
 
       {/* Customer Modal */}
       {showCustomerModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setShowCustomerModal(false)} />
-          <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className={`relative w-full max-w-2xl p-8 rounded-[3rem] border shadow-2xl ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-             <h2 className="text-3xl font-black mb-8">Complete Booking</h2>
+        <div className="admin-modal-overlay">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0" onClick={() => setShowCustomerModal(false)} />
+          <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="admin-modal-panel admin-modal-card admin-modal-card-lg">
+             <div className="admin-modal-header">
+               <div>
+                 <h2 className="admin-modal-title">Complete Booking</h2>
+                 <p className="admin-modal-subtitle">Select customer, optional agent, and confirm ticket generation.</p>
+               </div>
+               <button type="button" onClick={() => setShowCustomerModal(false)} className="admin-modal-close" aria-label="Close modal">
+                 <X className="h-5 w-5" />
+               </button>
+             </div>
              
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+             <div className="admin-modal-body grid gap-6 md:grid-cols-2">
                <div className="space-y-6">
                  <div>
                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Customer Selection</label>
@@ -572,14 +619,18 @@ const Booking: React.FC = () => {
                    </div>
                  </div>
 
-                 <button
-                   onClick={handleCustomerSelection}
-                   disabled={!selectedCustomer || loading}
-                   className="w-full bg-amber-600 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-amber-700 shadow-xl shadow-amber-600/20 disabled:opacity-50 transition-all"
-                 >
-                   {loading ? 'Processing...' : 'Confirm & Generate Tickets'}
-                 </button>
                </div>
+             </div>
+             <div className="admin-modal-footer">
+               <Button type="button" variant="secondary" onClick={() => setShowCustomerModal(false)}>
+                 Cancel
+               </Button>
+               <Button
+                 onClick={handleCustomerSelection}
+                 disabled={!selectedCustomer || loading}
+               >
+                 {loading ? 'Processing...' : 'Confirm & Generate Tickets'}
+               </Button>
              </div>
           </motion.div>
         </div>
@@ -587,17 +638,22 @@ const Booking: React.FC = () => {
 
       {/* Confirmation Modal */}
       {showConfirmation && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/90 backdrop-blur-xl" />
-          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className={`relative w-full max-w-md p-10 rounded-[3rem] text-center ${darkMode ? 'bg-slate-900 border border-slate-800' : 'bg-white shadow-2xl'}`}>
+        <div className="admin-modal-overlay">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0" />
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="admin-modal-panel admin-modal-card text-center">
              <div className="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
              </div>
              <h2 className="text-3xl font-black mb-2">Booking Success!</h2>
              <p className="opacity-60 font-medium mb-10">Tickets have been generated and recorded in the system.</p>
-             <div className="space-y-4">
-               <button onClick={() => window.location.href = '/admin/tickets'} className="w-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:opacity-90 transition-all">View All Tickets</button>
-               <button onClick={() => setShowConfirmation(false)} className="w-full py-5 rounded-2xl font-black text-sm uppercase tracking-widest opacity-40 hover:opacity-60 transition-all">New Booking</button>
+             {bookingResult?.bookings?.[0] && (
+               <div className="mb-8 rounded-2xl bg-amber-50 px-4 py-3 font-mono text-sm font-black text-amber-800">
+                 {getBookingReference(bookingResult.bookings[0])}
+               </div>
+             )}
+             <div className="admin-modal-footer">
+               <Button variant="secondary" onClick={() => setShowConfirmation(false)}>New Booking</Button>
+               <Button onClick={() => window.location.href = '/admin/tickets'}>View All Tickets</Button>
              </div>
           </motion.div>
         </div>

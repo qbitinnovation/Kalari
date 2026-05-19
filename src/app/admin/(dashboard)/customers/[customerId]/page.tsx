@@ -2,11 +2,13 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { buttonVariants } from '@/components/ui'
 import { useParams } from 'next/navigation'
 import { db, Customer, Booking } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { getBookingReference, getRecordId } from '@/lib/booking'
 import {
   ArrowLeftIcon,
   UserIcon,
@@ -120,10 +122,8 @@ const CustomerDetail: React.FC = () => {
         <p className={`text-sm mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
           The customer you're looking for doesn't exist.
         </p>
-        <Link href="/admin/customers"
-          className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-        >
-          <ArrowLeftIcon className="h-4 w-4 mr-2" />
+        <Link href="/admin/customers" className={buttonVariants({ size: 'md' })}>
+          <ArrowLeftIcon className="h-4 w-4" />
           Back to Customers
         </Link>
       </div>
@@ -291,8 +291,8 @@ const CustomerDetail: React.FC = () => {
                   const totalAmount = (booking.show?.price || 0) * seatCount
 
                   return (
-                    <motion.div
-                      key={booking.id}
+                      <motion.div
+                        key={getRecordId(booking)}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       className="p-6"
@@ -300,9 +300,9 @@ const CustomerDetail: React.FC = () => {
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center mb-2">
-                            <h4 className={`text-lg font-medium ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                              {booking.show?.title || 'Unknown Show'}
-                            </h4>
+                              <h4 className={`text-lg font-medium ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                                {booking.show?.title || 'Unknown Show'}
+                              </h4>
                             <span className={`ml-3 px-2 py-1 text-xs font-medium rounded-full ${
                               booking.status === 'CONFIRMED'
                                 ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
@@ -310,8 +310,11 @@ const CustomerDetail: React.FC = () => {
                             }`}>
                               {booking.status}
                             </span>
-                          </div>
-                          
+                            </div>
+                            <div className="mt-1 font-mono text-xs font-black text-amber-600">
+                              {getBookingReference(booking)}
+                            </div>
+                            
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                             <div className="flex items-center">
                               <CalendarIcon className={`h-4 w-4 mr-2 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />

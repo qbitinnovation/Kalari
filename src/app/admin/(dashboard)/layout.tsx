@@ -21,10 +21,8 @@ import {
   Bell,
   Sun,
   Moon,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Key,
   User,
   Users,
   UserRound,
@@ -33,6 +31,7 @@ import {
   Map
 } from 'lucide-react'
 import { db } from '@/lib/database'
+import { Button, Input } from '@/components/ui'
 
 const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, signOut } = useAuth()
@@ -54,7 +53,6 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     }
     return false
   })
-  const [showProfile, setShowProfile] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [passwordForm, setPasswordForm] = useState({
@@ -92,7 +90,6 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const handleSignOut = async () => {
     try {
       setSigningOut(true)
-      setShowProfile(false)
       await signOut()
       router.push('/admin/login')
     } catch (error) {
@@ -173,6 +170,45 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }
 
   const navigation = getNavigation()
+  const displayName = user?.full_name || `${user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Admin'} User`
+  const userInitial = (user?.full_name || user?.email || 'A').charAt(0).toUpperCase()
+  const routeLabels: Record<string, string> = {
+    '/admin': 'Dashboard',
+    '/admin/shows': 'Shows',
+    '/admin/booking': 'Book Seats',
+    '/admin/activity-bookings': 'Activity Bookings',
+    '/admin/customers': 'Customers',
+    '/admin/tickets': 'Ticket History',
+    '/admin/activities': 'Activities',
+    '/admin/layouts': 'Seat Layouts',
+    '/admin/customer-reports': 'Customer Reports',
+    '/admin/reports': 'Reports',
+    '/admin/analytics': 'Analytics',
+    '/admin/agents': 'Agents',
+    '/admin/staff': 'Staff Management',
+    '/admin/settings': 'Settings',
+  }
+  const formatSegment = (segment: string) => segment
+    .split('-')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+  const breadcrumbs = React.useMemo(() => {
+    const segments = pathname.split('/').filter(Boolean)
+    if (segments[0] !== 'admin') return [{ label: 'Dashboard', href: '/admin' }]
+
+    const trail = [{ label: 'Dashboard', href: '/admin' }]
+    let currentPath = '/admin'
+    segments.slice(1).forEach((segment, index) => {
+      currentPath += `/${segment}`
+      const parentPath = currentPath.split('/').slice(0, -1).join('/')
+      const isLast = index === segments.length - 2
+      const looksLikeId = segment.length > 16 || /^[a-f0-9]{12,}$/i.test(segment)
+      const label = routeLabels[currentPath] || (looksLikeId ? `${routeLabels[parentPath] || 'Record'} Detail` : formatSegment(segment))
+      trail.push({ label, href: isLast ? currentPath : currentPath })
+    })
+    return trail
+  }, [pathname])
+  const currentPageTitle = breadcrumbs[breadcrumbs.length - 1]?.label || 'Dashboard'
 
   return (
     <div className={`admin-portal min-h-screen transition-colors duration-200 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -208,16 +244,14 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <nav className="mt-8 px-4 pb-4">
                 <ul className="space-y-2">
                   {navigation.map((item) => {
-                    const isActive = pathname === item.href
+                    const isActive = item.href === '/admin' ? pathname === '/admin' : pathname === item.href || pathname.startsWith(`${item.href}/`)
                     return (
                       <li key={item.name}>
                         <Link
                           href={item.href}
                           onClick={() => setSidebarOpen(false)}
                           className={`flex items-center px-4 py-4 text-base font-medium rounded-xl transition-all duration-200 touch-manipulation ${isActive
-                            ? darkMode
-                              ? 'bg-slate-800 text-slate-100 shadow-sm border-l-4 border-slate-400'
-                              : 'bg-slate-100 text-slate-900 shadow-sm border-l-4 border-slate-600'
+                            ? 'admin-nav-link-active'
                             : darkMode
                               ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -234,34 +268,20 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
 
             <div className={`flex-shrink-0 p-4 border-t transition-colors duration-200 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3 min-w-0 flex-1">
-                  <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-slate-800 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <span className="text-white font-medium text-base">
-                      {user?.email?.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className={`text-base font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1)}
-                    </div>
-                    <div className={`text-sm truncate transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {user?.email}
-                    </div>
-                  </div>
-                </div>
+              <div className="flex items-center">
                 <button
                   onClick={handleSignOut}
                   disabled={signingOut}
-                  className={`p-2 rounded-lg transition-colors duration-200 touch-manipulation ${
+                  className={`flex w-full items-center justify-center gap-3 rounded-xl px-4 py-3 text-sm font-black uppercase tracking-widest transition-colors duration-200 touch-manipulation ${
                     signingOut 
                       ? 'opacity-50 cursor-not-allowed' 
                       : darkMode 
-                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' 
-                        : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                        ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' 
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
                 >
                   <LogOut className="h-6 w-6" />
+                  {signingOut ? 'Logging out...' : 'Logout'}
                 </button>
               </div>
             </div>
@@ -270,10 +290,17 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       )}
 
       {/* Desktop Sidebar */}
-      <div className={`hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-50 lg:block transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'} ${darkMode ? 'lg:bg-slate-900 lg:border-r lg:border-slate-800' : 'lg:bg-white lg:border-r lg:border-slate-200'}`}>
-        <div className={`flex h-16 items-center justify-between px-4 border-b transition-colors duration-200 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+      <div className={`hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-50 lg:flex lg:flex-col transition-all duration-300 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-72'} ${darkMode ? 'lg:bg-slate-900 lg:border-r lg:border-slate-800' : 'lg:bg-white lg:border-r lg:border-slate-200'}`}>
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className={`absolute -right-3 top-24 z-[70] flex h-7 w-7 items-center justify-center rounded-full border shadow-md transition-colors duration-200 ${darkMode ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        </button>
+        <div className={`flex h-20 items-center px-4 border-b transition-colors duration-200 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
           <div className="flex items-center space-x-3 min-w-0">
-            <div className="relative w-8 h-8 flex-shrink-0 transition-transform hover:scale-105">
+            <div className="relative w-10 h-10 flex-shrink-0 transition-transform hover:scale-105">
               <Image 
                 src="/logo.png" 
                 alt="Kovalam Kalari" 
@@ -283,35 +310,23 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
             {!sidebarCollapsed && (
               <div className="flex flex-col min-w-0">
-                <span className={`text-sm font-black tracking-tighter leading-none truncate ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>KOVALAM</span>
-                <span className="text-[10px] font-bold tracking-widest text-amber-600 leading-none mt-0.5">KALARI</span>
+                <span className={`text-base font-black tracking-tighter leading-none truncate ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>KOVALAM</span>
+                <span className="text-[11px] font-bold tracking-widest text-amber-600 leading-none mt-1">KALARI</span>
               </div>
             )}
           </div>
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={`p-1.5 rounded-lg transition-colors duration-200 ${darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
-          >
-            {sidebarCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </button>
         </div>
 
-        <nav className="mt-8 px-2">
+        <nav className="flex-1 overflow-y-auto px-3 py-6">
           <ul className="space-y-2">
             {navigation.map((item) => {
-              const isActive = pathname === item.href
+              const isActive = item.href === '/admin' ? pathname === '/admin' : pathname === item.href || pathname.startsWith(`${item.href}/`)
               return (
                 <li key={item.name}>
                   <Link
                     href={item.href}
-                    className={`flex items-center ${sidebarCollapsed ? 'justify-center px-3 py-3' : 'px-4 py-3'} text-sm font-medium rounded-xl transition-all duration-200 group relative ${isActive
-                      ? darkMode
-                        ? 'bg-slate-800 text-slate-100 shadow-sm'
-                        : 'bg-slate-100 text-slate-900 shadow-sm'
+                    className={`flex items-center ${sidebarCollapsed ? 'justify-center px-3 py-3' : 'px-4 py-3'} text-sm font-bold rounded-xl transition-all duration-200 group relative ${isActive
+                      ? 'admin-nav-link-active'
                       : darkMode
                         ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -331,61 +346,26 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </ul>
         </nav>
 
-        <div className={`absolute bottom-0 left-0 right-0 p-4 border-t transition-colors duration-200 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-          {sidebarCollapsed ? (
-            <div className="flex flex-col items-center space-y-2">
-              <div className="w-9 h-9 bg-gradient-to-br from-slate-600 to-slate-800 rounded-xl flex items-center justify-center group relative">
-                <span className="text-white font-medium text-sm">
-                  {user?.email?.charAt(0).toUpperCase()}
-                </span>
-                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                  {user?.email}
-                </div>
+        <div className={`shrink-0 border-t p-4 transition-colors duration-200 ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+          <button
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className={`group relative flex w-full items-center rounded-xl text-sm font-bold transition-all duration-200 ${sidebarCollapsed ? 'justify-center px-3 py-3' : 'px-4 py-3'} ${
+              signingOut
+                ? 'opacity-50 cursor-not-allowed'
+                : darkMode
+                  ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            <LogOut className={`h-5 w-5 flex-shrink-0 ${sidebarCollapsed ? '' : 'mr-3'}`} />
+            {!sidebarCollapsed && <span>{signingOut ? 'Logging out...' : 'Logout'}</span>}
+            {sidebarCollapsed && (
+              <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                Logout
               </div>
-              <button
-                onClick={handleSignOut}
-                disabled={signingOut}
-                className={`p-2 rounded-lg transition-colors duration-200 group relative ${
-                  signingOut 
-                    ? 'opacity-50 cursor-not-allowed' 
-                    : darkMode 
-                      ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' 
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                <LogOut className="h-4 w-4" />
-                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                  Sign Out
-                </div>
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                    {user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1)}
-                  </div>
-                  <div className={`text-xs truncate transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {user?.email}
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={handleSignOut}
-                disabled={signingOut}
-                className={`p-2 rounded-lg transition-colors duration-200 ${
-                  signingOut 
-                    ? 'opacity-50 cursor-not-allowed' 
-                    : darkMode 
-                      ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' 
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                <LogOut className="h-5 w-5" />
-              </button>
-            </div>
-          )}
+            )}
+          </button>
         </div>
       </div>
 
@@ -402,25 +382,36 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <div className="w-7 h-7 bg-gradient-to-br from-slate-600 to-slate-800 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-xs">K</span>
             </div>
-            <h1 className={`text-lg font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-              Kalari
+            <h1 className={`max-w-[12rem] truncate text-lg font-black transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+              {currentPageTitle}
             </h1>
           </div>
           <div className="w-10" />
         </div>
       </div>
 
-      {/* Header - All Pages */}
-      <div className={`sticky top-0 lg:top-0 z-40 transition-all duration-300 py-2 sm:py-4 px-0 ${sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'} ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-        <div className={`mx-2 sm:mx-4 rounded-2xl shadow-sm border px-4 sm:px-6 py-3 sm:py-4 transition-colors duration-200 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3 min-w-0 flex-1">
-              <div className="min-w-0">
-                <h1 className={`text-lg font-medium transition-colors duration-200 truncate ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                  <span className="hidden sm:inline">Kalari Booking Dashboard</span>
-                  <span className="sm:hidden">Kalari Booking</span>
-                </h1>
-              </div>
+      {/* Header — desktop, same height as sidebar logo row (h-20) */}
+      <div
+        className={`sticky top-0 z-40 hidden transition-all duration-300 lg:block ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'}`}
+      >
+        <div
+          className={`flex h-20 items-center justify-between border-b px-4 sm:px-6 transition-colors duration-200 ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}
+        >
+            <div className="min-w-0 flex-1">
+              <nav className={`flex min-w-0 items-center gap-1 text-sm font-black uppercase tracking-widest ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} aria-label="Breadcrumb">
+                {breadcrumbs.map((crumb, index) => (
+                  <React.Fragment key={`${crumb.href}-${index}`}>
+                    {index > 0 && <ChevronRight className="h-4 w-4 flex-shrink-0 opacity-50" />}
+                    {index === breadcrumbs.length - 1 ? (
+                      <span className="truncate text-amber-600">{crumb.label}</span>
+                    ) : (
+                      <Link href={crumb.href} className={`truncate ${darkMode ? 'hover:text-slate-200' : 'hover:text-slate-900'}`}>
+                        {crumb.label}
+                      </Link>
+                    )}
+                  </React.Fragment>
+                ))}
+              </nav>
             </div>
 
             <div className="flex items-center space-x-2 flex-shrink-0">
@@ -449,122 +440,74 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
               </button>
 
-              <div className="relative">
-                <button
-                  onClick={() => setShowProfile(!showProfile)}
-                  className={`flex items-center space-x-2 p-2 rounded-xl transition-colors duration-200 ${darkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
-                >
-                  <div className="w-7 h-7 bg-gradient-to-br from-slate-600 to-slate-800 rounded-xl flex items-center justify-center">
-                    <span className="text-white font-medium text-xs">{user?.email?.charAt(0).toUpperCase()}</span>
-                  </div>
-                  <ChevronDown className="h-3 w-3 text-slate-500 hidden sm:block" />
-                </button>
-
-                {showProfile && (
-                  <div className={`absolute right-0 mt-2 w-44 rounded-xl shadow-lg border py-2 z-[60] transition-colors duration-200 backdrop-blur-sm ${darkMode ? 'bg-slate-900/95 border-slate-800' : 'bg-white/95 border-slate-200'}`}>
-                    <button
-                      onClick={() => {
-                        setShowProfile(false)
-                        setShowPasswordModal(true)
-                      }}
-                      className={`flex items-center w-full text-left px-4 py-3 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-100'}`}
-                    >
-                      <Key className="h-4 w-4 mr-2" />
-                      Change Password
-                    </button>
-                    <button
-                      onClick={handleSignOut}
-                      disabled={signingOut}
-                      className={`flex items-center w-full text-left px-4 py-3 text-sm font-medium transition-colors duration-200 ${
-                        signingOut 
-                          ? 'opacity-50 cursor-not-allowed' 
-                          : darkMode 
-                            ? 'text-slate-300 hover:bg-slate-800' 
-                            : 'text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      {signingOut ? 'Signing Out...' : 'Sign Out'}
-                    </button>
-                  </div>
-                )}
+              <div className={`hidden items-center gap-3 rounded-2xl border px-3 py-2 sm:flex ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-slate-600 to-slate-800">
+                  <span className="text-sm font-bold text-white">{userInitial}</span>
+                </div>
+                <div className="min-w-0 text-left">
+                  <div className={`max-w-40 truncate text-sm font-black ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>{displayName}</div>
+                  <div className={`max-w-44 truncate text-xs ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{user?.email}</div>
+                </div>
               </div>
             </div>
-          </div>
         </div>
       </div>
 
-      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'}`}>
-        <main className="min-h-screen px-2 pb-4 sm:px-4 lg:px-6 lg:pb-6">
-          <div className="admin-page-surface min-h-[calc(100vh-7.25rem)] rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 shadow-sm sm:p-6">
+      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'}`}>
+        <main className="min-h-screen px-2 pb-4 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pb-6">
+          <div className="admin-page-surface min-h-[calc(100vh-8.5rem)] rounded-2xl border p-4 shadow-sm sm:p-6">
             {children}
           </div>
         </main>
       </div>
 
       {showPasswordModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="admin-modal-panel rounded-2xl p-6 max-w-md w-full transition-colors duration-200">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className={`text-xl font-semibold transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                Change Password
-              </h2>
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-panel admin-modal-card">
+            <div className="admin-modal-header">
+              <div>
+                <h2 className="admin-modal-title">Change Password</h2>
+                <p className="admin-modal-subtitle">Update the password for the current admin session.</p>
+              </div>
               <button
                 onClick={() => {
                   setShowPasswordModal(false)
                   setPasswordForm({ newPassword: '', confirmPassword: '' })
                   setPasswordError('')
                 }}
-                className={`p-2 rounded-lg transition-colors duration-200 ${darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
+                className="admin-modal-close"
+                aria-label="Close modal"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handlePasswordChange} className="space-y-4">
-              <div>
-                <label className={`block text-sm font-medium mb-2 transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  New Password
-                </label>
-                <input
-                  type="password"
-                  value={passwordForm.newPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                  required
-                  minLength={6}
-                  className="admin-modal-field"
-                  placeholder="Enter new password"
-                />
-              </div>
-              <div>
-                <label className={`block text-sm font-medium mb-2 transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Confirm New Password
-                </label>
-                <input
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-                  required
-                  minLength={6}
-                  className="admin-modal-field"
-                  placeholder="Confirm new password"
-                />
-              </div>
+            <form onSubmit={handlePasswordChange} className="flex min-h-0 flex-1 flex-col">
+              <div className="admin-modal-body space-y-4">
+              <Input
+                label="New Password"
+                type="password"
+                value={passwordForm.newPassword}
+                onChange={(newPassword) => setPasswordForm({ ...passwordForm, newPassword })}
+                required
+                placeholder="Enter new password"
+              />
+              <Input
+                label="Confirm New Password"
+                type="password"
+                value={passwordForm.confirmPassword}
+                onChange={(confirmPassword) => setPasswordForm({ ...passwordForm, confirmPassword })}
+                required
+                placeholder="Confirm new password"
+              />
               {passwordError && <div className="text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">{passwordError}</div>}
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowPasswordModal(false)}
-                  className={`flex-1 py-3 px-4 rounded-xl font-medium transition-colors duration-200 ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-200 text-slate-800 hover:bg-slate-300'}`}
-                >
+              </div>
+              <div className="admin-modal-footer">
+                <Button type="button" variant="secondary" onClick={() => setShowPasswordModal(false)}>
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={passwordLoading}
-                  className={`flex-1 py-3 px-4 rounded-xl font-medium transition-colors duration-200 ${passwordLoading ? 'opacity-50 cursor-not-allowed' : ''} bg-blue-600 text-white hover:bg-blue-700`}
-                >
+                </Button>
+                <Button type="submit" disabled={passwordLoading}>
                   {passwordLoading ? 'Updating...' : 'Update Password'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

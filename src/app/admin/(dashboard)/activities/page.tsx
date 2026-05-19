@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Clock, MapPin, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import { Clock, MapPin, Pencil, Plus, Star, Trash2, X } from "lucide-react";
 import { db } from "@/lib/database";
 import { activityImages } from "@/lib/seedData";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { Button, Input, Select, Textarea } from "@/components/ui";
 
 type Activity = {
   id: string;
@@ -131,10 +132,10 @@ export default function AdminActivitiesPage() {
           <h1 className={`text-3xl font-semibold ${darkMode ? "text-white" : "text-slate-900"}`}>Activities</h1>
           <p className={`mt-1 text-sm ${darkMode ? "text-slate-400" : "text-slate-600"}`}>Manage public activity cards, Kalary booking products, prices, and images.</p>
         </div>
-        <button onClick={openCreate} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800">
+        <Button onClick={openCreate}>
           <Plus className="h-5 w-5" />
           Add Activity
-        </button>
+        </Button>
       </div>
 
       {loading ? (
@@ -176,42 +177,46 @@ export default function AdminActivitiesPage() {
       )}
 
       {modalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
-          <form onSubmit={saveActivity} className="admin-modal-panel max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl p-6">
-            <h2 className="text-2xl font-black">{editing ? "Edit Activity" : "Add Activity"}</h2>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              <Field label="Title" value={form.title} onChange={(value) => setForm({ ...form, title: value, slug: form.slug || slugify(value) })} required />
-              <Field label="Slug" value={form.slug} onChange={(value) => setForm({ ...form, slug: value })} required />
-              <Field label="Category" value={form.category} onChange={(value) => setForm({ ...form, category: value })} required />
-              <Field label="Location" value={form.location} onChange={(value) => setForm({ ...form, location: value })} required />
-              <Field label="Duration" value={form.duration} onChange={(value) => setForm({ ...form, duration: value })} required />
-              <Field label="Price" type="number" value={form.price} onChange={(value) => setForm({ ...form, price: value })} required />
-              <Field label="Rating" type="number" value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} required />
-              <Field label="Review Count" type="number" value={form.review_count} onChange={(value) => setForm({ ...form, review_count: value })} required />
-              <label className="sm:col-span-2">
-                <span className="admin-modal-label">Image URL</span>
-                <input value={form.image} onChange={(event) => setForm({ ...form, image: event.target.value })} required className="admin-modal-field" />
-              </label>
-              <label className="sm:col-span-2">
-                <span className="admin-modal-label">Description</span>
-                <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} required rows={4} className="admin-modal-field" />
-              </label>
-              <Field label="Tags comma separated" value={form.tags} onChange={(value) => setForm({ ...form, tags: value })} />
-              <label>
-                <span className="admin-modal-label">Status</span>
-                <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as "ACTIVE" | "DRAFT" })} className="admin-modal-field">
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="DRAFT">DRAFT</option>
-                </select>
-              </label>
+        <div className="admin-modal-overlay">
+          <form onSubmit={saveActivity} className="admin-modal-panel admin-modal-card admin-modal-card-lg">
+            <div className="admin-modal-header">
+              <div>
+                <h2 className="admin-modal-title">{editing ? "Edit Activity" : "Add Activity"}</h2>
+                <p className="admin-modal-subtitle">Manage public activity cards, pricing, and visibility.</p>
+              </div>
+              <button type="button" onClick={() => setModalOpen(false)} className="admin-modal-close" aria-label="Close modal">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="admin-modal-body grid gap-4 sm:grid-cols-2">
+              <Input label="Title" value={form.title} onChange={(title) => setForm({ ...form, title, slug: form.slug || slugify(title) })} required />
+              <Input label="Slug" value={form.slug} onChange={(slug) => setForm({ ...form, slug })} required />
+              <Input label="Category" value={form.category} onChange={(category) => setForm({ ...form, category })} required />
+              <Input label="Location" value={form.location} onChange={(location) => setForm({ ...form, location })} required />
+              <Input label="Duration" value={form.duration} onChange={(duration) => setForm({ ...form, duration })} required />
+              <Input label="Price" type="number" value={form.price} onChange={(price) => setForm({ ...form, price })} required />
+              <Input label="Rating" type="number" value={form.rating} onChange={(rating) => setForm({ ...form, rating })} required />
+              <Input label="Review Count" type="number" value={form.review_count} onChange={(review_count) => setForm({ ...form, review_count })} required />
+              <Input label="Image URL" value={form.image} onChange={(image) => setForm({ ...form, image })} required className="sm:col-span-2" />
+              <Textarea label="Description" value={form.description} onChange={(description) => setForm({ ...form, description })} required rows={4} className="sm:col-span-2" />
+              <Input label="Tags comma separated" value={form.tags} onChange={(tags) => setForm({ ...form, tags })} />
+              <Select
+                label="Status"
+                value={form.status}
+                onChange={(status) => setForm({ ...form, status: status as "ACTIVE" | "DRAFT" })}
+                options={[
+                  { value: "ACTIVE", label: "ACTIVE" },
+                  { value: "DRAFT", label: "DRAFT" },
+                ]}
+              />
               <label className="flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-slate-950 dark:bg-slate-900 dark:text-slate-100">
                 <input type="checkbox" checked={form.featured} onChange={(event) => setForm({ ...form, featured: event.target.checked })} />
                 <span className="font-bold">Featured on homepage</span>
               </label>
             </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button type="button" onClick={() => setModalOpen(false)} className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-800 dark:bg-slate-800 dark:text-slate-100">Cancel</button>
-              <button type="submit" className="rounded-xl bg-amber-600 px-5 py-3 font-bold text-white">Save Activity</button>
+            <div className="admin-modal-footer">
+              <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
+              <Button type="submit">Save Activity</Button>
             </div>
           </form>
         </div>
@@ -220,9 +225,3 @@ export default function AdminActivitiesPage() {
   );
 }
 
-const Field = ({ label, value, onChange, type = "text", required }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) => (
-  <label>
-    <span className="admin-modal-label">{label}</span>
-    <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} className="admin-modal-field" />
-  </label>
-);
