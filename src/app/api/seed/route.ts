@@ -24,6 +24,7 @@ async function seed() {
   await ensureMongoBootstrapUsers();
   const UserModel = User as any;
   const password_hash = await bcrypt.hash("admin123", 10);
+  const staff_password_hash = await bcrypt.hash("staff123", 10);
   await UserModel.updateOne(
     { email: "admin@kalari.local" },
     {
@@ -56,6 +57,22 @@ async function seed() {
     { upsert: true }
   );
 
+  await UserModel.updateOne(
+    { email: "staff@kalari.local" },
+    {
+      $set: {
+        email: "staff@kalari.local",
+        password_hash: staff_password_hash,
+        role: "staff",
+        full_name: "Kalari Staff",
+        active: true,
+        updated_at: new Date().toISOString(),
+      },
+      $setOnInsert: { created_at: new Date().toISOString() },
+    },
+    { upsert: true }
+  );
+
   const [activityCount, showCount, layoutCount] = await Promise.all([
     seedCollection("activities", data.activities),
     seedCollection("shows", data.shows),
@@ -67,6 +84,7 @@ async function seed() {
     credentials: {
       ...envCredentialSummary(),
       localAdmin: "admin@kalari.local / admin123",
+      staff: "staff@kalari.local / staff123",
       agent: "agent@kalari.local / admin123",
     },
     counts: {
@@ -90,6 +108,7 @@ export async function GET() {
       credentials: {
         ...envCredentialSummary(),
         localAdmin: "admin@kalari.local / admin123",
+        staff: "staff@kalari.local / staff123",
         agent: "agent@kalari.local / admin123",
       },
       counts: {

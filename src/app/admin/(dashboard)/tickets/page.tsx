@@ -12,7 +12,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
-import { getBookingReference } from '@/lib/booking'
+import { getBookingReference, isGeneralAdmissionSeatCode } from '@/lib/booking'
 import { Button } from '@/components/ui'
 import { DatePicker } from '@/components/ui'
 
@@ -21,13 +21,18 @@ interface TicketWithDetails extends Ticket {
     title: string
     date: string
     time: string
+    type?: 'KALARI' | 'EVENT'
   }
-  booking?: {
+    booking?: {
     id?: string
     _id?: string
     booking_reference?: string
     customer_id: string
     agent_id?: string
+    status?: 'CONFIRMED' | 'CANCELLED'
+    cancellation_status?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED'
+    cancellation_reason?: string
+    cancellation_requested_at?: string
     customer?: {
       name: string
       email?: string
@@ -44,11 +49,16 @@ interface BookingGroup {
     title: string
     date: string
     time: string
+    type?: 'KALARI' | 'EVENT'
   }
   tickets: TicketWithDetails[]
   total_price: number
   seat_codes: string[]
   status: string
+  booking_status?: 'CONFIRMED' | 'CANCELLED'
+  cancellation_status?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED'
+  cancellation_reason?: string
+  cancellation_requested_at?: string
   generated_at: string
   booked_by: string
   customer?: {
@@ -69,6 +79,8 @@ const Tickets: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>('') // Date filter state
   const [selectedBooking, setSelectedBooking] = useState<BookingGroup | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [reviewingCancellation, setReviewingCancellation] = useState(false)
+  const [cancellationReviewError, setCancellationReviewError] = useState('')
 
   useEffect(() => {
     fetchBookings()
@@ -94,9 +106,15 @@ const Tickets: React.FC = () => {
         .from('tickets')
         .select(`
           *,
-          show:shows(title, date, time),
+          show:shows(title, date, time, type),
           booking:bookings(
+            booking_reference,
             customer_id,
+            agent_id,
+            status,
+            cancellation_status,
+            cancellation_reason,
+            cancellation_requested_at,
             customer:customers(name, email, phone)
           )
         `)
@@ -118,6 +136,10 @@ const Tickets: React.FC = () => {
             total_price: 0,
             seat_codes: [],
             status: ticket.status,
+            booking_status: ticket.booking?.status,
+            cancellation_status: ticket.booking?.cancellation_status,
+            cancellation_reason: ticket.booking?.cancellation_reason,
+            cancellation_requested_at: ticket.booking?.cancellation_requested_at,
             generated_at: ticket.generated_at,
             booked_by: ticket.booked_by,
             customer: ticket.booking?.customer
@@ -150,20 +172,63 @@ const Tickets: React.FC = () => {
       booking.booking_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.show?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.seat_codes.some(code => code.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      booking.tickets.some(ticket => ticket.ticket_code.toLowerCase().includes(searchTerm.toLowerCase())) ||
       booking.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.customer?.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      booking.customer?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      booking.customer?.phone?.toLowerCase().includes(searchTerm.toLowerCase())
     
     const matchesStatus = statusFilter === 'all' || 
       (statusFilter === 'active' && booking.status === 'ACTIVE') ||
       (statusFilter === 'completed' && booking.status === 'COMPLETED') ||
-      (statusFilter === 'revoked' && booking.status === 'REVOKED')
+      (statusFilter === 'revoked' && booking.status === 'REVOKED') ||
+      (statusFilter === 'cancellation-pending' && booking.cancellation_status === 'PENDING')
     
     return matchesSearch && matchesStatus
   })
 
+  const isEventBooking = (booking: BookingGroup) =>
+    booking.show?.type === 'EVENT' || booking.seat_codes.every(isGeneralAdmissionSeatCode)
+
+  const getTicketDisplayLabel = (booking: BookingGroup) => isEventBooking(booking) ? 'Admission' : 'Seats'
+
+  const getTicketDisplayValues = (booking: BookingGroup) =>
+    isEventBooking(booking) ? ['GENERAL'] : booking.seat_codes
+
+  const getQrValue = (booking: BookingGroup) =>
+    booking.booking_reference
+
+  const canReviewCancellation = (booking: BookingGroup) =>
+    (user?.role === 'admin' || user?.role === 'staff') && booking.cancellation_status === 'PENDING'
+
+  const reviewCancellation = async (booking: BookingGroup, action: 'APPROVE' | 'REJECT') => {
+    setReviewingCancellation(true)
+    setCancellationReviewError('')
+    try {
+      const response = await fetch('/api/admin/cancellation-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: booking.booking_id,
+          action,
+          reviewerRole: user?.role,
+          reviewerId: user?.id,
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Could not review cancellation request.')
+      await fetchBookings()
+      setShowPreview(false)
+      setSelectedBooking(null)
+    } catch (error: any) {
+      setCancellationReviewError(error.message || 'Could not review cancellation request.')
+    } finally {
+      setReviewingCancellation(false)
+    }
+  }
+
   const handlePrintBooking = (booking: BookingGroup) => {
     // Use the same QR code API as a reliable source
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(booking.booking_reference)}`
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(getQrValue(booking))}`
     
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
@@ -286,7 +351,7 @@ const Tickets: React.FC = () => {
           <div class="container">
             <div class="ticket">
               <div class="header">
-                <div class="title">KALARI BOOKING</div>
+                <div class="title">${isEventBooking(booking) ? 'EVENT TICKET' : 'KALARI BOOKING'}</div>
                 <div class="divider"></div>
                 <div class="show-title">${booking.show?.title || 'N/A'}</div>
               </div>
@@ -301,8 +366,8 @@ const Tickets: React.FC = () => {
                   <span class="info-value">${booking.show?.time ? format(new Date(`2000-01-01T${booking.show.time}`), 'h:mm a') : 'N/A'}</span>
                 </div>
                 <div class="seats-section">
-                  <div class="seats-label">Seats:</div>
-                  <div class="seats-box">${booking.seat_codes.join(', ')}</div>
+                  <div class="seats-label">${getTicketDisplayLabel(booking)}:</div>
+                  <div class="seats-box">${getTicketDisplayValues(booking).join(', ')}</div>
                 </div>
                 <div class="info-row">
                   <span class="info-label">Quantity:</span>
@@ -428,6 +493,7 @@ const Tickets: React.FC = () => {
               <option value="active">Active</option>
               <option value="completed">Completed</option>
               <option value="revoked">Revoked</option>
+              <option value="cancellation-pending">Cancellation Requests</option>
             </select>
           </div>
         </div>
@@ -450,7 +516,7 @@ const Tickets: React.FC = () => {
                     Customer
                   </th>
                   <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Seats
+                    Seats / Tickets
                   </th>
                   <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Quantity
@@ -476,6 +542,11 @@ const Tickets: React.FC = () => {
                       <div className={`text-sm font-mono transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
                         {booking.booking_reference}
                       </div>
+                      {booking.cancellation_status === 'PENDING' && (
+                        <div className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                          Cancellation Request
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>{booking.show?.title}</div>
@@ -500,7 +571,12 @@ const Tickets: React.FC = () => {
                             </div>
                             {booking.customer.email && (
                               <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                {booking.customer.email}
+                            {booking.customer.email}
+                              </div>
+                            )}
+                            {booking.customer.phone && (
+                              <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                {booking.customer.phone}
                               </div>
                             )}
                           </div>
@@ -513,14 +589,14 @@ const Tickets: React.FC = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {booking.seat_codes.length > 3 
-                          ? `${booking.seat_codes.slice(0, 3).join(', ')}...` 
-                          : booking.seat_codes.join(', ')
+                        {getTicketDisplayValues(booking).length > 3 
+                          ? `${getTicketDisplayValues(booking).slice(0, 3).join(', ')}...` 
+                          : getTicketDisplayValues(booking).join(', ')
                         }
                       </div>
-                      {booking.seat_codes.length > 3 && (
+                      {getTicketDisplayValues(booking).length > 3 && (
                         <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          +{booking.seat_codes.length - 3} more
+                          +{getTicketDisplayValues(booking).length - 3} more
                         </div>
                       )}
                     </td>
@@ -564,6 +640,7 @@ const Tickets: React.FC = () => {
                         <button
                           onClick={() => {
                             setSelectedBooking(booking)
+                            setCancellationReviewError('')
                             setShowPreview(true)
                           }}
                           className="text-primary-600 hover:text-primary-900"
@@ -616,7 +693,7 @@ const Tickets: React.FC = () => {
               <div className={`border-2 border-dashed p-4 rounded-xl transition-colors duration-200 ${darkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-300 bg-slate-50'}`}>
                 <div className="text-center mb-4">
                   <h4 className={`text-xl font-bold transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                    KALARI BOOKING
+                    {isEventBooking(selectedBooking) ? 'EVENT TICKET' : 'KALARI BOOKING'}
                   </h4>
                   <div className={`h-px my-2 transition-colors duration-200 ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
                   <h5 className={`text-lg font-semibold transition-colors duration-200 ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>
@@ -646,9 +723,9 @@ const Tickets: React.FC = () => {
                     </span>
                   </div>
                   <div>
-                    <span className={`font-medium block mb-1 transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Seats:</span>
+                    <span className={`font-medium block mb-1 transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{getTicketDisplayLabel(selectedBooking)}:</span>
                     <div className={`border p-2 rounded text-center font-bold transition-colors duration-200 ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-slate-400 bg-slate-100 text-slate-900'}`}>
-                      {selectedBooking.seat_codes.join(', ')}
+                      {getTicketDisplayValues(selectedBooking).join(', ')}
                     </div>
                   </div>
                   <div className="flex justify-between">
@@ -668,7 +745,7 @@ const Tickets: React.FC = () => {
                 {/* QR Code */}
                 <div className="text-center mb-4">
                   <QRCode
-                    value={selectedBooking.booking_reference}
+                    value={getQrValue(selectedBooking)}
                     size={120}
                     bgColor={darkMode ? '#1e293b' : '#ffffff'}
                     fgColor={darkMode ? '#f1f5f9' : '#000000'}
@@ -686,19 +763,63 @@ const Tickets: React.FC = () => {
                 </div>
               </div>
 
+              {selectedBooking.cancellation_status && selectedBooking.cancellation_status !== 'NONE' && (
+                <div className={`mt-4 rounded-xl border p-4 ${selectedBooking.cancellation_status === 'PENDING' ? darkMode ? 'border-amber-800 bg-amber-950/30' : 'border-amber-200 bg-amber-50' : darkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h4 className="font-black">Cancellation Request</h4>
+                    <span className={`rounded-full px-3 py-1 text-xs font-black ${selectedBooking.cancellation_status === 'PENDING' ? 'bg-amber-500 text-white' : selectedBooking.cancellation_status === 'APPROVED' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-100'}`}>
+                      {selectedBooking.cancellation_status}
+                    </span>
+                  </div>
+                  {selectedBooking.cancellation_requested_at && (
+                    <p className="mt-2 text-xs font-bold opacity-60">
+                      Requested {format(new Date(selectedBooking.cancellation_requested_at), 'MMM dd, yyyy h:mm a')}
+                    </p>
+                  )}
+                  <div className={`mt-3 rounded-lg border p-3 text-sm font-semibold leading-6 ${darkMode ? 'border-slate-700 bg-slate-900/70' : 'border-slate-200 bg-white'}`}>
+                    {selectedBooking.cancellation_reason || 'No cancellation note provided.'}
+                  </div>
+                </div>
+              )}
+
+              {cancellationReviewError && (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                  {cancellationReviewError}
+                </div>
+              )}
+
             </div>
 
               <div className="admin-modal-footer">
-                <Button
-                  onClick={() => {
-                    handlePrintBooking(selectedBooking)
-                    setShowPreview(false)
-                    setSelectedBooking(null)
-                  }}
-                >
-                  <PrinterIcon className="h-4 w-4" />
-                  Print
-                </Button>
+                {canReviewCancellation(selectedBooking) ? (
+                  <>
+                    <Button
+                      variant="danger"
+                      disabled={reviewingCancellation}
+                      onClick={() => reviewCancellation(selectedBooking, 'APPROVE')}
+                    >
+                      {reviewingCancellation ? 'Reviewing...' : 'Approve Cancellation'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={reviewingCancellation}
+                      onClick={() => reviewCancellation(selectedBooking, 'REJECT')}
+                    >
+                      Reject Request
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      handlePrintBooking(selectedBooking)
+                      setShowPreview(false)
+                      setSelectedBooking(null)
+                    }}
+                  >
+                    <PrinterIcon className="h-4 w-4" />
+                    Print
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   onClick={() => {

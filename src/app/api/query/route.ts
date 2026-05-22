@@ -62,7 +62,7 @@ const attachRelations = async (collection: string, docs: any[] | any) => {
       if (show.layout_id) show.layout = layoutById.get(String(show.layout_id)) || null;
     });
     const Booking = getGenericModel("bookings") as any;
-    const bookings = await Booking.find({ show_id: { $in: rows.map((show: any) => String(getRecordId(show))) }, status: "CONFIRMED" }).lean();
+    const bookings = await Booking.find({ show_id: { $in: rows.map((show: any) => String(getRecordId(show))) }, status: { $in: ["CONFIRMED", "HELD"] } }).lean();
     const bookingsByShow = new Map<string, any[]>();
     bookings.forEach((booking: any) => {
       const key = String(booking.show_id);

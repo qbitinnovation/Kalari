@@ -5,7 +5,7 @@ import { format } from "date-fns";
 import { CalendarDays, Plus, RefreshCw, Ticket, Trash2, User } from "lucide-react";
 import { db, Customer } from "@/lib/database";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { createBookingReference, createTicketCode, getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
+import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
 import { Button, Input, Select } from "@/components/ui";
 
 type Activity = {
@@ -116,14 +116,15 @@ export default function ActivityBookingsPage() {
         const now = new Date().toISOString();
         const bookedBy = selectedCustomer?.name || "Walk-in customer";
         const bookingReference = createBookingReference(new Date(now));
-        const ticketCodes = Array.from({ length: form.ticketCount }).map((_, index) => `ACT-${Date.now()}-${index + 1}`);
+        const seatCodes = Array.from({ length: form.ticketCount }).map(() => "GENERAL");
+        const ticketCodes = createTicketCodes(form.ticketCount, new Date(now));
         const { data: createdBookings, error: bookingError } = await db.from("bookings").insert([{
           booking_reference: bookingReference,
           show_id: recordId(selectedSlot),
         activity_id: selectedSlot.activity_id || form.activityId || null,
         customer_id: selectedCustomer ? recordId(selectedCustomer) : null,
         booked_by: bookedBy,
-        seat_code: JSON.stringify(ticketCodes),
+        seat_code: JSON.stringify(seatCodes),
         booking_time: now,
         status: "CONFIRMED",
           payment_method: form.paymentMethod,
@@ -135,11 +136,11 @@ export default function ActivityBookingsPage() {
       if (bookingError || !createdBookings?.[0]) throw new Error(bookingError?.message || "Could not create activity booking.");
       const bookingId = recordId(createdBookings[0]);
 
-      const { error: ticketError } = await db.from("tickets").insert(ticketCodes.map((seatCode) => ({
+      const { error: ticketError } = await db.from("tickets").insert(seatCodes.map((seatCode, index) => ({
         booking_id: bookingId,
         show_id: recordId(selectedSlot),
         seat_code: seatCode,
-        ticket_code: createTicketCode(),
+        ticket_code: ticketCodes[index],
         price: Number(selectedSlot.price || 0),
         generated_by: bookedBy,
         generated_at: now,
@@ -147,6 +148,21 @@ export default function ActivityBookingsPage() {
       })));
 
       if (ticketError) throw new Error(ticketError.message || "Could not create tickets.");
+      await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "NEW_BOOKING",
+          module: "BOOKING",
+          title: "New activity booking",
+          message: `${bookingReference} was booked for ${selectedSlot.title}.`,
+          severity: "SUCCESS",
+          entity_type: "booking",
+          entity_id: bookingId,
+          action_url: "/admin/tickets",
+          metadata: { booking_reference: bookingReference, show_id: recordId(selectedSlot) },
+        }),
+      }).catch(() => null);
 
       setForm({ activityId: "", slotId: "", customerId: "", ticketCount: 1, paymentMethod: "COD" });
       await fetchData();

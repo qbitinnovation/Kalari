@@ -2,6 +2,15 @@ import bcrypt from "bcryptjs";
 import { User } from "@/lib/db";
 import { readStore, writeStore } from "@/lib/localStore";
 
+const localTestUsers = [
+  {
+    email: "staff@kalari.local",
+    password: "staff123",
+    role: "staff",
+    full_name: "Kalari Staff",
+  },
+];
+
 const envUsers = () => {
   const users = [
     {
@@ -66,7 +75,7 @@ export async function ensureLocalBootstrapUsers() {
   store.users = store.users || [];
   const syncPasswords = shouldSyncBootstrapPasswords();
 
-  for (const user of envUsers()) {
+  for (const user of [...localTestUsers, ...envUsers()]) {
     const existing = store.users.find((item: any) => item.email === user.email);
     if (!existing) {
       store.users.push({

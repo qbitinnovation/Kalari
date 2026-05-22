@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB, { getGenericModel } from "@/lib/db";
 import { readStore, writeStore } from "@/lib/localStore";
 import mongoose from "mongoose";
+import { createNotification } from "@/lib/notificationStore";
 
 const recordId = (record: any) => String(record?.id || record?._id || "");
 
@@ -46,6 +47,17 @@ export async function POST(req: NextRequest) {
         },
       }
     );
+    await createNotification({
+      type: "CANCELLATION_REQUEST",
+      module: "CANCELLATION",
+      title: "Cancellation request received",
+      message: `Booking ${booking.booking_reference || recordId(booking)} has a customer cancellation request.`,
+      severity: "WARNING",
+      entity_type: "booking",
+      entity_id: recordId(booking),
+      action_url: "/admin/tickets",
+      metadata: { booking_reference: booking.booking_reference, reason },
+    });
 
     return NextResponse.json({ data: { success: true } });
   } catch {
@@ -75,6 +87,17 @@ export async function POST(req: NextRequest) {
       cancellation_status: "PENDING",
     };
     await writeStore(store);
+    await createNotification({
+      type: "CANCELLATION_REQUEST",
+      module: "CANCELLATION",
+      title: "Cancellation request received",
+      message: `Booking ${booking.booking_reference || recordId(booking)} has a customer cancellation request.`,
+      severity: "WARNING",
+      entity_type: "booking",
+      entity_id: recordId(booking),
+      action_url: "/admin/tickets",
+      metadata: { booking_reference: booking.booking_reference, reason },
+    });
 
     return NextResponse.json({ data: { success: true }, fallback: true });
   }

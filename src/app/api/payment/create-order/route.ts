@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRazorpay } from '@/lib/razorpay';
+import { createNotification } from '@/lib/notificationStore';
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +24,14 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: order });
   } catch (error: any) {
+    await createNotification({
+      type: "PAYMENT_FAILURE",
+      module: "PAYMENT",
+      title: "Razorpay order failed",
+      message: error.message || "A Razorpay order could not be created.",
+      severity: "ERROR",
+      action_url: "/admin/tickets",
+    });
     return NextResponse.json({ error: error.message || "Failed to create order" }, { status: 500 });
   }
 }

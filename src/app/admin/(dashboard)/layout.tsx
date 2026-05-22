@@ -30,7 +30,7 @@ import {
   ShieldCheck,
   Map
 } from 'lucide-react'
-import { db } from '@/lib/database'
+import { db, type Notification } from '@/lib/database'
 import { Button, Input } from '@/components/ui'
 
 const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -54,6 +54,8 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     return false
   })
   const [showNotifications, setShowNotifications] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [passwordForm, setPasswordForm] = useState({
     newPassword: '',
@@ -61,10 +63,11 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   })
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
+  const notificationId = (notification: Notification) => String(notification.id || notification._id || '')
 
   useEffect(() => {
     if (!user) return
-    const staffRoutes = ['/admin/booking', '/admin/tickets', '/admin/customers', '/admin/activity-bookings']
+    const staffRoutes = ['/admin/shows', '/admin/activities', '/admin/booking', '/admin/tickets', '/admin/customers', '/admin/activity-bookings']
     const agentRoutes = ['/admin/booking', '/admin/tickets']
     if (user.role === 'staff' && !staffRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
       router.replace('/admin/booking')
@@ -86,6 +89,45 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', JSON.stringify(sidebarCollapsed))
   }, [sidebarCollapsed])
+
+  const fetchNotifications = React.useCallback(async () => {
+    if (!user?.role) return
+    setNotificationsLoading(true)
+    try {
+      const response = await fetch(`/api/notifications?role=${encodeURIComponent(user.role)}&limit=12`)
+      const payload = await response.json().catch(() => ({}))
+      if (response.ok) setNotifications(payload.data || [])
+    } finally {
+      setNotificationsLoading(false)
+    }
+  }, [user?.role])
+
+  useEffect(() => {
+    fetchNotifications()
+    if (!user?.role) return
+    const interval = window.setInterval(fetchNotifications, 60000)
+    return () => window.clearInterval(interval)
+  }, [fetchNotifications, user?.role])
+
+  const markNotificationRead = async (notification: Notification) => {
+    if (!user?.id || (notification.read_by || []).includes(user.id)) return
+    const id = notificationId(notification)
+    if (!id) return
+    setNotifications((current) => current.map((item) =>
+      notificationId(item) === id ? { ...item, read_by: [...(item.read_by || []), user.id] } : item
+    ))
+    await fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notificationId: id, userId: user.id }),
+    }).catch(() => null)
+  }
+
+  const openNotification = async (notification: Notification) => {
+    await markNotificationRead(notification)
+    setShowNotifications(false)
+    if (notification.action_url) router.push(notification.action_url)
+  }
 
   const handleSignOut = async () => {
     try {
@@ -138,10 +180,12 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   const getNavigation = () => {
     const staffNavigation = [
+      { name: 'Shows', href: '/admin/shows', icon: Film },
       { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
       { name: 'Activity Bookings', href: '/admin/activity-bookings', icon: Map },
       { name: 'Customers', href: '/admin/customers', icon: User },
       { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
+      { name: 'Activities', href: '/admin/activities', icon: Map },
     ]
     const agentNavigation = [
       { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
@@ -151,9 +195,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     if (user?.role === 'admin') {
       return [
         { name: 'Dashboard', href: '/admin', icon: Home },
-        { name: 'Shows', href: '/admin/shows', icon: Film },
         ...staffNavigation,
-        { name: 'Activities', href: '/admin/activities', icon: Map },
         { name: 'Layouts', href: '/admin/layouts', icon: LayoutGrid },
         { name: 'Customer Reports', href: '/admin/customer-reports', icon: FileText },
         { name: 'Reports', href: '/admin/reports', icon: BarChart },
@@ -209,6 +251,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     return trail
   }, [pathname])
   const currentPageTitle = breadcrumbs[breadcrumbs.length - 1]?.label || 'Dashboard'
+  const unreadNotifications = notifications.filter((notification) => !(notification.read_by || []).includes(user?.id || '')).length
 
   return (
     <div className={`admin-portal min-h-screen transition-colors duration-200 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -417,17 +460,58 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <div className="flex items-center space-x-2 flex-shrink-0">
               <div className="relative">
                 <button
-                  onClick={() => setShowNotifications(!showNotifications)}
+                  onClick={() => {
+                    setShowNotifications(!showNotifications)
+                    if (!showNotifications) fetchNotifications()
+                  }}
                   className={`p-2 rounded-xl relative transition-colors duration-200 ${darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
                 >
                   <Bell className="h-5 w-5" />
+                  {unreadNotifications > 0 && (
+                    <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-stone-950">
+                      {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                    </span>
+                  )}
                 </button>
                 {showNotifications && (
-                   <div className="absolute right-0 mt-2 w-80 rounded-2xl shadow-xl border backdrop-blur-xl z-50 transition-all duration-200 bg-white/95 border-slate-200/50 dark:bg-slate-900/95 dark:border-slate-700/50 p-6">
-                      <div className="text-center">
-                        <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm font-medium">Coming Soon</p>
-                        <p className="text-xs opacity-60">Real-time notifications are in development.</p>
+                   <div className="absolute right-0 mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border bg-white/95 shadow-xl backdrop-blur-xl transition-all duration-200 z-50 border-slate-200/50 dark:bg-slate-900/95 dark:border-slate-700/50">
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+                        <div>
+                          <p className="text-sm font-black">Notifications</p>
+                          <p className="text-xs opacity-60">{unreadNotifications} unread for {user?.role}</p>
+                        </div>
+                        <button onClick={fetchNotifications} className={`rounded-lg px-2 py-1 text-xs font-bold ${darkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}>
+                          Refresh
+                        </button>
+                      </div>
+                      <div className="max-h-[26rem] overflow-y-auto p-2">
+                        {notificationsLoading && notifications.length === 0 ? (
+                          <div className="p-6 text-center text-sm font-bold opacity-60">Loading notifications...</div>
+                        ) : notifications.length === 0 ? (
+                          <div className="p-6 text-center">
+                            <Bell className="mx-auto mb-2 h-7 w-7 opacity-40" />
+                            <p className="text-sm font-bold">No notifications yet</p>
+                          </div>
+                        ) : notifications.map((notification) => {
+                          const unread = !(notification.read_by || []).includes(user?.id || '')
+                          return (
+                            <button
+                              key={notificationId(notification)}
+                              onClick={() => openNotification(notification)}
+                              className={`mb-1 w-full rounded-xl border p-3 text-left transition-colors ${unread ? darkMode ? 'border-amber-800/70 bg-amber-950/25' : 'border-amber-200 bg-amber-50' : darkMode ? 'border-slate-800 hover:bg-slate-800/70' : 'border-slate-100 hover:bg-slate-50'}`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-[10px] font-black uppercase tracking-widest opacity-50">{notification.module}</p>
+                                  <p className="mt-1 text-sm font-black">{notification.title}</p>
+                                </div>
+                                {unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />}
+                              </div>
+                              <p className="mt-1 text-xs font-semibold leading-5 opacity-70">{notification.message}</p>
+                              <p className="mt-2 text-[10px] font-bold opacity-40">{new Date(notification.created_at).toLocaleString()}</p>
+                            </button>
+                          )
+                        })}
                       </div>
                    </div>
                 )}

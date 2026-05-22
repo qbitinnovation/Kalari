@@ -8,7 +8,7 @@ const enrichShows = async (shows: any[]) => {
   const Booking = getGenericModel("bookings") as any;
   const [layouts, bookings] = await Promise.all([
     Layout.find().lean(),
-    Booking.find({ status: "CONFIRMED" }).lean(),
+    Booking.find({ status: { $in: ["CONFIRMED", "HELD"] } }).lean(),
   ]);
 
   const layoutById = new Map<string, any>();

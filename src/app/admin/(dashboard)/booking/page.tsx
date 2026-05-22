@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logBookingCreation } from '@/utils/activityLogger'
-import { createBookingReference, createTicketCode, getBookingReference, getRecordId, parseSeatCodes } from '@/lib/booking'
+import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, isActiveBookingReservation, parseSeatCodes } from '@/lib/booking'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
@@ -17,8 +17,8 @@ import {
   type ArenaSide,
 } from '@/lib/arenaLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { X } from 'lucide-react'
-import { Button, DatePicker } from '@/components/ui'
+import { CalendarDays, Clock, IndianRupee, Ticket, X } from 'lucide-react'
+import { Button, DatePicker, Input, Select } from '@/components/ui'
 
 interface SeatData {
   id: string
@@ -48,30 +48,23 @@ const Booking: React.FC = () => {
   const [selectedShow, setSelectedShow] = useState<Show | null>(null)
   const [seats, setSeats] = useState<SeatData[]>([])
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [eventTicketCount, setEventTicketCount] = useState(1)
   const [loading, setLoading] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [bookingResult, setBookingResult] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<string>('')
-  const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [submittingCustomer, setSubmittingCustomer] = useState(false)
+  const [checkoutCustomerPhone, setCheckoutCustomerPhone] = useState('')
+  const [checkoutCustomerName, setCheckoutCustomerName] = useState('')
+  const [checkoutCustomerError, setCheckoutCustomerError] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string>('')
   const darkMode = useDarkMode()
   const { user } = useAuth()
 
-  // Filter customers based on search term
-  const filteredCustomers = customers.filter(customer =>
-    customer.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-    customer.email?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-    customer.phone?.includes(customerSearchTerm)
-  )
-
   useEffect(() => {
     fetchActiveShows()
-    fetchCustomers()
     fetchAgents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -79,6 +72,8 @@ const Booking: React.FC = () => {
   useEffect(() => {
     if (selectedShow) {
       fetchSeatsForShow(recordId(selectedShow))
+      setSelectedSeats([])
+      setEventTicketCount(1)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShow])
@@ -108,7 +103,6 @@ const Booking: React.FC = () => {
           *,
           layout:layouts(*)
         `)
-        .eq('type', 'KALARI')
         .in('status', ['ACTIVE', 'SHOW_STARTED'])
         .gte('date', new Date().toISOString().split('T')[0])
         .order('date')
@@ -122,16 +116,6 @@ const Booking: React.FC = () => {
       setShows(activeShows)
     } catch (error) {
       console.error('Error fetching shows:', error)
-    }
-  }
-
-  const fetchCustomers = async () => {
-    try {
-      const { data, error } = await db.from('customers').select('*').order('name')
-      if (error) throw error
-      setCustomers(data || [])
-    } catch (error) {
-      console.error('Error fetching customers:', error)
     }
   }
 
@@ -189,8 +173,9 @@ const Booking: React.FC = () => {
         }
         return total + ((section.rows || 0) * (section.seatsPerRow || 0))
       }, 0) || 0
-      const { data: bookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(show)).eq('status', 'CONFIRMED')
+      const { data: bookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(show)).in('status', ['CONFIRMED', 'HELD'])
       const bookedSeatsCount = bookings?.reduce((count, booking) => {
+        if (!isActiveBookingReservation(booking)) return count
         try {
           const seats = JSON.parse(booking.seat_code)
           return count + (Array.isArray(seats) ? seats.length : 1)
@@ -206,7 +191,14 @@ const Booking: React.FC = () => {
     setLoading(true)
     try {
       const show = shows.find(s => recordId(s) === showId)
-      if (!show?.layout) return
+      if (show?.type === 'EVENT') {
+        setSeats([])
+        return
+      }
+      if (!show?.layout) {
+        setSeats([])
+        return
+      }
       const generatedSeats: SeatData[] = []
 
       getSymmetricArenaSections(show.layout.structure.sections || []).forEach((section: any) => {
@@ -238,9 +230,10 @@ const Booking: React.FC = () => {
         }
       })
 
-      const { data: bookings } = await db.from('bookings').select('seat_code').eq('show_id', showId).eq('status', 'CONFIRMED')
+      const { data: bookings } = await db.from('bookings').select('seat_code').eq('show_id', showId).in('status', ['CONFIRMED', 'HELD'])
       const bookedSeats = new Set<string>()
       bookings?.forEach(booking => {
+        if (!isActiveBookingReservation(booking)) return
         try {
           const s = JSON.parse(booking.seat_code)
           if (Array.isArray(s)) s.forEach(seat => bookedSeats.add(seat))
@@ -262,38 +255,78 @@ const Booking: React.FC = () => {
     setSelectedSeats(prev => prev.includes(seatId) ? prev.filter(id => id !== seatId) : [...prev, seatId])
   }
 
-  const getTotalAmount = () => (selectedShow?.price || 100) * selectedSeats.length
+  const getTicketQuantity = () => selectedShow?.type === 'EVENT' ? eventTicketCount : selectedSeats.length
+
+  const getTotalAmount = () => (selectedShow?.price || 100) * getTicketQuantity()
 
   const handleContinueBooking = () => {
-    if (!selectedShow || selectedSeats.length === 0) return
+    if (!selectedShow || getTicketQuantity() === 0) return
+    setCheckoutCustomerError('')
     setShowCustomerModal(true)
   }
 
-  const handleBookSeats = async () => {
-    if (!selectedShow || selectedSeats.length === 0 || !selectedCustomer) return
+  const findOrCreateCheckoutCustomer = async () => {
+    const phone = checkoutCustomerPhone.trim()
+    if (!/^[0-9+\s-]{10,}$/.test(phone)) {
+      throw new Error('Enter a valid customer mobile number.')
+    }
+
+    const { data: existingCustomers, error: existingError } = await db.from('customers').select('*').eq('phone', phone)
+    if (existingError) throw new Error(existingError.message || 'Could not check customer mobile number.')
+    if (existingCustomers?.[0]) return existingCustomers[0] as Customer
+
+    const now = new Date().toISOString()
+    const { data: customers, error } = await db.from('customers').insert([{
+      name: checkoutCustomerName.trim() || 'Walk-in Customer',
+      phone,
+      email: '',
+      created_at: now,
+      updated_at: now,
+    }]).select()
+
+    if (error || !customers?.[0]) throw new Error(error?.message || 'Could not create customer.')
+    return customers[0] as Customer
+  }
+
+  const handleBookSeats = async (customer: Customer) => {
+    if (!selectedShow || getTicketQuantity() === 0) return
     try {
       setLoading(true)
-      const { data: existingBookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(selectedShow)).eq('status', 'CONFIRMED')
-      const allBookedSeats = existingBookings?.flatMap(booking => {
-        return parseSeatCodes(booking.seat_code)
-      }) || []
-      const conflictingSeats = selectedSeats.filter(seat => allBookedSeats.includes(seat))
-      if (conflictingSeats.length > 0) {
-        alert(`Some seats are already booked. Please refresh and try again.`)
-        fetchSeatsForShow(recordId(selectedShow))
-        return
+      const { data: existingBookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(selectedShow)).in('status', ['CONFIRMED', 'HELD'])
+      const activeBookings = existingBookings?.filter(isActiveBookingReservation) || []
+      if (selectedShow.type === 'EVENT') {
+        const bookedCount = activeBookings.reduce((count: number, booking: any) => count + parseSeatCodes(booking.seat_code).length, 0)
+        const capacity = Number(selectedShow.capacity || 0)
+        if (capacity > 0 && bookedCount + eventTicketCount > capacity) {
+          alert(`Only ${Math.max(0, capacity - bookedCount)} tickets left. Please reduce the ticket count.`)
+          return
+        }
+      } else {
+        const allBookedSeats = activeBookings.flatMap(booking => {
+          return parseSeatCodes(booking.seat_code)
+        })
+        const conflictingSeats = selectedSeats.filter(seat => allBookedSeats.includes(seat))
+        if (conflictingSeats.length > 0) {
+          alert(`Some seats are already booked. Please refresh and try again.`)
+          fetchSeatsForShow(recordId(selectedShow))
+          return
+        }
       }
 
       const agent = agents.find(a => recordId(a) === selectedAgentId)
       const commissionAmount = agent ? (getTotalAmount() * (agent.commission_percentage || 0)) / 100 : 0
       const bookingReference = createBookingReference()
+      const seatCodesToSave = selectedShow.type === 'EVENT'
+        ? Array.from({ length: eventTicketCount }).map(() => 'GENERAL')
+        : selectedSeats
+      const generatedTicketCodes = createTicketCodes(seatCodesToSave.length)
 
       const bookingToInsert = {
         booking_reference: bookingReference,
         show_id: recordId(selectedShow),
-        seat_code: JSON.stringify(selectedSeats),
-        booked_by: selectedCustomer.name,
-        customer_id: selectedCustomer.id,
+        seat_code: JSON.stringify(seatCodesToSave),
+        booked_by: customer.name,
+        customer_id: recordId(customer),
         agent_id: selectedAgentId || null,
         commission_amount: commissionAmount,
         payment_method: 'COUNTER',
@@ -309,31 +342,57 @@ const Booking: React.FC = () => {
       const booking = bookings[0]
       const bookingId = recordId(booking)
 
-      const ticketsToInsert = selectedSeats.map(seatCode => ({
+      const ticketsToInsert = seatCodesToSave.map((seatCode, index) => ({
         booking_id: bookingId, show_id: recordId(selectedShow), seat_code: seatCode,
-        ticket_code: createTicketCode(),
+        ticket_code: generatedTicketCodes[index],
         price: selectedShow.price || 100, generated_by: 'admin', generated_at: new Date().toISOString(), status: 'ACTIVE'
       }))
 
       const { data: tickets, error: ticketError } = await db.from('tickets').insert(ticketsToInsert).select()
       if (ticketError) throw ticketError
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'NEW_BOOKING',
+          module: 'BOOKING',
+          title: 'New counter booking',
+          message: `${getBookingReference(booking)} was booked for ${selectedShow.title}.`,
+          severity: 'SUCCESS',
+          entity_type: 'booking',
+          entity_id: bookingId,
+          action_url: '/admin/tickets',
+          metadata: { booking_reference: getBookingReference(booking), show_id: recordId(selectedShow) },
+        }),
+      }).catch(() => null)
 
       const { data: { user } } = await db.auth.getUser()
       await logBookingCreation(bookingId, selectedShow.title, user?.email || 'unknown', {
-        booking_reference: getBookingReference(booking), seat_codes: selectedSeats, total_price: getTotalAmount(), agent_name: agent?.full_name
+        booking_reference: getBookingReference(booking), seat_codes: seatCodesToSave, total_price: getTotalAmount(), agent_name: agent?.full_name
       })
 
       setBookingResult({ bookings, tickets, success: true, totalAmount: getTotalAmount() })
       setShowConfirmation(true)
+      setShowCustomerModal(false)
+      setCheckoutCustomerPhone('')
+      setCheckoutCustomerName('')
       setSelectedSeats([])
-      fetchSeatsForShow(recordId(selectedShow))
+      setEventTicketCount(1)
+      if (selectedShow.type === 'KALARI') fetchSeatsForShow(recordId(selectedShow))
     } catch (error: any) { alert(`Error: ${error.message}`) } finally { setLoading(false) }
   }
 
-  const handleCustomerSelection = async () => {
-    if (!selectedCustomer) return
-    setShowCustomerModal(false)
-    await handleBookSeats()
+  const handleCustomerCheckout = async () => {
+    setSubmittingCustomer(true)
+    setCheckoutCustomerError('')
+    try {
+      const customer = await findOrCreateCheckoutCustomer()
+      await handleBookSeats(customer)
+    } catch (error: any) {
+      setCheckoutCustomerError(error.message || 'Could not complete booking.')
+    } finally {
+      setSubmittingCustomer(false)
+    }
   }
 
   const getRowsForSection = (section: string) =>
@@ -468,16 +527,30 @@ const Booking: React.FC = () => {
 
   return (
     <div className={darkMode ? 'text-slate-100' : 'text-slate-900'}>
-      <div className="w-full">
-        <header className="mb-6">
-          <h1 className="text-4xl font-black tracking-tight mb-2">Book Seats</h1>
-          <p className="opacity-60 font-medium">Manage bookings and issue tickets for Kalari Arena</p>
+      <div className="w-full space-y-6">
+        <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h1 className="mb-2 text-4xl font-black tracking-tight">Book Tickets</h1>
+            <p className="max-w-2xl font-medium opacity-60">Manage Kalari seat bookings and general event tickets</p>
+          </div>
+          <div className="w-full max-w-sm lg:pt-1">
+            <label className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest opacity-50">
+              <CalendarDays className="h-4 w-4" />
+              Select Date
+            </label>
+            <DatePicker
+              value={selectedDate}
+              onChange={setSelectedDate}
+              placeholder="Select date"
+              triggerClassName={`font-bold ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}
+            />
+          </div>
         </header>
 
-        <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <section className="space-y-6">
           {/* Left Column: Show Selection */}
-          <div className="space-y-6 lg:col-span-1">
-            <div className={`rounded-2xl border p-4 shadow-sm sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+          <div className="space-y-6">
+            <div className={`hidden rounded-2xl border p-4 shadow-sm sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
               <h2 className="mb-5 flex items-center gap-2 text-xl font-bold">
                 <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
                 Select Date
@@ -502,16 +575,42 @@ const Booking: React.FC = () => {
                 <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
                 Available Shows
               </h2>
-              <div className="space-y-3">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {shows.map(show => (
                   <button
                     key={recordId(show)}
                     onClick={() => setSelectedShow(show)}
-                    className={`w-full rounded-2xl border-2 p-4 text-left transition-all ${selectedShow?.id === show.id ? 'border-amber-500 bg-amber-500/5 shadow-lg' : darkMode ? 'border-slate-800 bg-slate-800/50 hover:border-slate-700' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}
+                    className={`flex min-h-[190px] w-full flex-col rounded-2xl border-2 p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg ${selectedShow && recordId(selectedShow) === recordId(show) ? 'border-amber-500 bg-amber-500/10 shadow-lg shadow-amber-500/10' : darkMode ? 'border-slate-800 bg-slate-800/50 hover:border-slate-700' : 'border-slate-100 bg-slate-50 hover:border-amber-200'}`}
                   >
-                    <div className="font-black text-lg leading-tight mb-1">{show.title}</div>
-                    <div className="text-xs font-bold opacity-50 uppercase tracking-widest">{format(new Date(show.date), 'EEE, MMM dd')} • {show.time}</div>
-                    <div className="mt-2 text-amber-600 font-black">₹{show.price}</div>
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+                      <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${show.type === 'EVENT' ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
+                        {show.type === 'EVENT' ? 'Event Tickets' : 'Kalari Seating'}
+                      </span>
+                      {selectedShow && recordId(selectedShow) === recordId(show) && (
+                        <span className="rounded-full bg-amber-500 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white">Selected</span>
+                      )}
+                    </div>
+                    <div className="text-lg font-black leading-tight">{show.title}</div>
+                    <div className="mt-4 space-y-2 text-sm font-bold opacity-60">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4 shrink-0" />
+                        {format(new Date(show.date), 'EEE, MMM dd')}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 shrink-0" />
+                        {show.time}
+                      </div>
+                    </div>
+                    <div className="mt-auto flex items-end justify-between gap-3 pt-5">
+                      <span className="flex items-center gap-1 text-xl font-black text-amber-600">
+                        <IndianRupee className="h-4 w-4" />
+                        {show.price}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs font-black uppercase tracking-widest opacity-50">
+                        <Ticket className="h-4 w-4" />
+                        {show.type === 'EVENT' ? `Limit ${show.capacity || 0}` : 'Seats'}
+                      </span>
+                    </div>
                   </button>
                 ))}
                 {shows.length === 0 && <div className="py-12 text-center opacity-30 font-bold">No shows found</div>}
@@ -528,21 +627,39 @@ const Booking: React.FC = () => {
                     <h2 className="text-2xl font-black">{selectedShow.title}</h2>
                     <p className="text-sm font-bold opacity-40 uppercase tracking-widest">{format(new Date(selectedShow.date), 'PPPP')} @ {selectedShow.time}</p>
                   </div>
-                  {selectedSeats.length > 0 && (
+                  {getTicketQuantity() > 0 && (
                     <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-4">
                       <div className="text-right">
                         <div className="text-[10px] font-black uppercase tracking-widest opacity-40">Total Amount</div>
                         <div className="text-2xl font-black text-amber-600">₹{getTotalAmount()}</div>
                       </div>
                       <Button onClick={handleContinueBooking} size="lg" className="uppercase tracking-widest">
-                        Checkout ({selectedSeats.length})
+                        Checkout ({getTicketQuantity()})
                       </Button>
                     </motion.div>
                   )}
                 </div>
 
                 <div className="overflow-x-auto pb-8">
-                  {loading ? <div className="h-96 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div></div> : renderRectangularSeatMap()}
+                  {loading ? (
+                    <div className="h-96 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div></div>
+                  ) : selectedShow.type === 'EVENT' ? (
+                    <div className={`rounded-2xl border p-6 ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className="mb-5">
+                        <h3 className="text-xl font-black">General admission tickets</h3>
+                        <p className="mt-1 text-sm font-bold opacity-50">No seat selection is needed for this event. Select the number of tickets to issue.</p>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <button onClick={() => setEventTicketCount(Math.max(1, eventTicketCount - 1))} className={`flex h-12 w-12 items-center justify-center rounded-xl border text-xl font-black ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>-</button>
+                        <div className="min-w-24 text-center">
+                          <div className="text-3xl font-black text-amber-600">{eventTicketCount}</div>
+                          <div className="text-[10px] font-black uppercase tracking-widest opacity-40">Tickets</div>
+                        </div>
+                        <button onClick={() => setEventTicketCount(Math.min(Number(selectedShow.capacity || 9999), eventTicketCount + 1))} className={`flex h-12 w-12 items-center justify-center rounded-xl border text-xl font-black ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>+</button>
+                      </div>
+                      <div className="mt-5 text-sm font-bold opacity-60">Ticket limit: {selectedShow.capacity || 'Unlimited'}</div>
+                    </div>
+                  ) : renderRectangularSeatMap()}
                 </div>
               </div>
             ) : (
@@ -557,13 +674,22 @@ const Booking: React.FC = () => {
 
       {/* Customer Modal */}
       {showCustomerModal && (
-        <div className="admin-modal-overlay">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0" onClick={() => setShowCustomerModal(false)} />
-          <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="admin-modal-panel admin-modal-card admin-modal-card-lg">
+        <div
+          className="admin-modal-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowCustomerModal(false)
+          }}
+        >
+          <motion.div
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="admin-modal-panel admin-modal-card admin-modal-card-lg"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
              <div className="admin-modal-header">
                <div>
                  <h2 className="admin-modal-title">Complete Booking</h2>
-                 <p className="admin-modal-subtitle">Select customer, optional agent, and confirm ticket generation.</p>
+                 <p className="admin-modal-subtitle">Link this counter booking to the customer mobile number.</p>
                </div>
                <button type="button" onClick={() => setShowCustomerModal(false)} className="admin-modal-close" aria-label="Close modal">
                  <X className="h-5 w-5" />
@@ -572,43 +698,66 @@ const Booking: React.FC = () => {
              
              <div className="admin-modal-body grid gap-6 md:grid-cols-2">
                <div className="space-y-6">
-                 <div>
-                   <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Customer Selection</label>
-                   <input type="text" placeholder="Search customer..." value={customerSearchTerm} onChange={e => setCustomerSearchTerm(e.target.value)} className={`w-full p-4 rounded-2xl border font-bold outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`} />
-                   <div className="mt-3 max-h-48 overflow-y-auto space-y-1 rounded-2xl border p-2 dark:border-slate-800">
-                     {filteredCustomers.map(c => (
-                       <button key={c.id} onClick={() => setSelectedCustomer(c)} className={`w-full p-3 rounded-xl text-left text-sm font-bold transition-all ${selectedCustomer?.id === c.id ? 'bg-amber-500 text-white' : darkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}>
-                         {c.name} <span className="opacity-60 text-[10px] ml-2">{c.phone}</span>
-                       </button>
-                     ))}
+                 <div className={`rounded-2xl border p-5 ${darkMode ? 'border-slate-800 bg-slate-950/30' : 'border-slate-200 bg-slate-50'}`}>
+                   <div className="mb-4">
+                     <h3 className="text-lg font-black">Customer Contact</h3>
+                     <p className="mt-1 text-sm font-bold opacity-50">Existing customers are reused by mobile number. New mobile numbers create a customer record for this booking.</p>
+                   </div>
+                   <div className="space-y-4">
+                     <Input
+                       label="Mobile Number"
+                       type="tel"
+                       value={checkoutCustomerPhone}
+                       onChange={(phone) => {
+                         setCheckoutCustomerPhone(phone)
+                         setCheckoutCustomerError('')
+                       }}
+                       placeholder="+91 98765 43210"
+                       required
+                       error={checkoutCustomerError}
+                     />
+                     <Input
+                       label="Customer Name (optional for new mobile)"
+                       value={checkoutCustomerName}
+                       onChange={setCheckoutCustomerName}
+                       placeholder="Walk-in Customer"
+                     />
                    </div>
                  </div>
                </div>
 
                <div className="space-y-6">
                  <div>
-                   <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Agent (Optional)</label>
                    {user?.role === 'agent' ? (
-                     <div className={`w-full p-4 rounded-2xl border font-bold ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                       {agents.find(a => recordId(a) === selectedAgentId)?.full_name || user.email}
-                     </div>
+                     <>
+                       <label className="mb-2 block text-[10px] font-black uppercase tracking-widest opacity-40">Agent (Optional)</label>
+                       <div className={`w-full p-4 rounded-2xl border font-bold ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                         {agents.find(a => recordId(a) === selectedAgentId)?.full_name || user.email}
+                       </div>
+                     </>
                    ) : (
-                     <select 
-                       value={selectedAgentId} 
-                       onChange={e => setSelectedAgentId(e.target.value)}
-                       className={`w-full p-4 rounded-2xl border font-bold outline-none ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-                     >
-                       <option value="">No Agent</option>
-                       {agents.map(a => (
-                         <option key={recordId(a)} value={recordId(a)}>{a.full_name} ({a.commission_percentage}%)</option>
-                       ))}
-                     </select>
+                     <Select
+                       label="Agent (Optional)"
+                       value={selectedAgentId || '__none__'}
+                       onChange={(value) => setSelectedAgentId(value === '__none__' ? '' : value)}
+                       options={[
+                         { value: '__none__', label: 'No Agent' },
+                         ...agents.map(agent => ({
+                           value: recordId(agent),
+                           label: `${agent.full_name} (${agent.commission_percentage || 0}%)`,
+                         })),
+                       ]}
+                       searchable={agents.length > 3}
+                       triggerClassName="rounded-2xl px-4 py-4 font-bold"
+                     />
                    )}
                  </div>
 
                  <div className={`p-6 rounded-3xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                    <div className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4">Summary</div>
                    <div className="space-y-2">
+                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Show:</span><span className="text-right">{selectedShow?.title}</span></div>
+                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Tickets:</span><span>{getTicketQuantity()}</span></div>
                      <div className="flex justify-between font-bold"><span>Total:</span><span>₹{getTotalAmount()}</span></div>
                      {selectedAgentId && (
                        <div className="flex justify-between text-xs font-bold text-amber-600">
@@ -626,10 +775,10 @@ const Booking: React.FC = () => {
                  Cancel
                </Button>
                <Button
-                 onClick={handleCustomerSelection}
-                 disabled={!selectedCustomer || loading}
+                 onClick={handleCustomerCheckout}
+                 disabled={!checkoutCustomerPhone.trim() || loading || submittingCustomer}
                >
-                 {loading ? 'Processing...' : 'Confirm & Generate Tickets'}
+                 {loading || submittingCustomer ? 'Processing...' : 'Confirm & Generate Tickets'}
                </Button>
              </div>
           </motion.div>

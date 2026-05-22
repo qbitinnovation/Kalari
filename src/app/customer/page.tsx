@@ -70,7 +70,7 @@ export default function CustomerDashboardPage() {
 
   const { upcoming, past } = useMemo(() => {
     const now = new Date();
-    const activeBookings = bookings.filter((booking) => booking.status !== "CANCELLED");
+    const activeBookings = bookings.filter((booking) => booking.status === "CONFIRMED");
     return {
       upcoming: activeBookings.filter((booking) => showDateTime(booking) >= now),
       past: activeBookings.filter((booking) => showDateTime(booking) < now),

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRazorpay } from '@/lib/razorpay';
 import crypto from 'crypto';
+import { createNotification } from '@/lib/notificationStore';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,11 +23,28 @@ export async function POST(req: NextRequest) {
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
+      await createNotification({
+        type: "PAYMENT_FAILURE",
+        module: "PAYMENT",
+        title: "Payment verification failed",
+        message: `Razorpay verification failed for order ${razorpay_order_id}.`,
+        severity: "ERROR",
+        action_url: "/admin/tickets",
+        metadata: { razorpay_order_id, razorpay_payment_id },
+      });
       return NextResponse.json({ error: "Payment verification failed", valid: false }, { status: 400 });
     }
 
     return NextResponse.json({ data: { valid: true, payment_id: razorpay_payment_id } });
   } catch (error: any) {
+    await createNotification({
+      type: "PAYMENT_FAILURE",
+      module: "PAYMENT",
+      title: "Payment verification error",
+      message: error.message || "Payment verification failed.",
+      severity: "ERROR",
+      action_url: "/admin/tickets",
+    });
     return NextResponse.json({ error: error.message || "Verification failed" }, { status: 500 });
   }
 }

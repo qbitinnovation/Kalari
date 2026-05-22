@@ -4,6 +4,9 @@ import { readStore, writeStore } from "@/lib/localStore";
 
 const normalizePhone = (phone: string) => phone.replace(/[^\d+]/g, "").trim();
 const recordId = (record: any) => String(record?.id || record?._id || "");
+const createToken = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+const tokenExpiry = () => new Date(Date.now() + 15 * 60 * 1000).toISOString();
+const hasPassword = (customer: any) => Boolean(customer?.password_hash || customer?.password);
 
 const customerPayload = (customer: any) => ({
   id: recordId(customer),
@@ -32,17 +35,44 @@ export async function POST(req: NextRequest) {
 
     await Otp.updateOne({ _id: otp._id }, { $set: { used: true, used_at: new Date().toISOString() } });
     let customer = await Customer.findOne({ phone }).lean();
+    const registrationToken = createToken();
     if (!customer) {
       customer = await Customer.create({
         name: "Guest Customer",
         phone,
         email: "",
+        phone_verified: true,
+        registration_token: registrationToken,
+        registration_token_expires_at: tokenExpiry(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
+    } else if (!hasPassword(customer)) {
+      await Customer.updateOne(
+        { _id: customer._id },
+        {
+          $set: {
+            phone_verified: true,
+            registration_token: registrationToken,
+            registration_token_expires_at: tokenExpiry(),
+            updated_at: new Date().toISOString(),
+          },
+        }
+      );
+      customer = await Customer.findOne({ phone }).lean();
+    } else {
+      await Customer.updateOne({ _id: customer._id }, { $set: { phone_verified: true, updated_at: new Date().toISOString() } });
     }
 
-    return NextResponse.json({ data: { success: true, customer: customerPayload(customer) } });
+    const passwordReady = hasPassword(customer);
+    return NextResponse.json({
+      data: {
+        success: true,
+        mode: passwordReady ? "login" : "register",
+        customer: passwordReady ? customerPayload(customer) : undefined,
+        registration_token: passwordReady ? undefined : (customer?.registration_token || registrationToken),
+      },
+    });
   } catch {
     const phone = normalizePhone(String(body?.phone || ""));
     const code = String(body?.code || "").trim();
@@ -62,19 +92,40 @@ export async function POST(req: NextRequest) {
 
     store.customer_otps[otpIndex] = { ...otp, used: true, used_at: new Date().toISOString() };
     let customer = store.customers.find((item: any) => item.phone === phone);
+    const registrationToken = createToken();
     if (!customer) {
       customer = {
         id: `customer-${Date.now()}`,
         name: "Guest Customer",
         phone,
         email: "",
+        phone_verified: true,
+        registration_token: registrationToken,
+        registration_token_expires_at: tokenExpiry(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
       store.customers.push(customer);
+    } else if (!hasPassword(customer)) {
+      customer.phone_verified = true;
+      customer.registration_token = registrationToken;
+      customer.registration_token_expires_at = tokenExpiry();
+      customer.updated_at = new Date().toISOString();
+    } else {
+      customer.phone_verified = true;
+      customer.updated_at = new Date().toISOString();
     }
     await writeStore(store);
 
-    return NextResponse.json({ data: { success: true, customer: customerPayload(customer) }, fallback: true });
+    const passwordReady = hasPassword(customer);
+    return NextResponse.json({
+      data: {
+        success: true,
+        mode: passwordReady ? "login" : "register",
+        customer: passwordReady ? customerPayload(customer) : undefined,
+        registration_token: passwordReady ? undefined : customer.registration_token,
+      },
+      fallback: true,
+    });
   }
 }

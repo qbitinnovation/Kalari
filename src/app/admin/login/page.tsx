@@ -4,7 +4,7 @@ import React, { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { Eye, EyeOff, Shield, ArrowRight, Sparkles, User, Lock, Mail } from 'lucide-react'
+import { Eye, EyeOff, Shield, ArrowRight, Sparkles, Lock, Mail } from 'lucide-react'
 import { motion } from 'framer-motion'
 
 const Login: React.FC = () => {
@@ -40,7 +40,6 @@ const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center relative overflow-hidden">
-      {/* Dynamic Background Elements */}
       <div className="absolute inset-0 z-0">
         <img 
           src="https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=2400&q=80" 
@@ -50,7 +49,6 @@ const Login: React.FC = () => {
         <div className="absolute inset-0 bg-gradient-to-t from-stone-950 via-stone-950/80 to-transparent" />
       </div>
 
-      {/* Floating Blobs */}
       <div className="absolute top-1/4 -left-20 w-80 h-80 bg-amber-600/10 blur-[120px] rounded-full animate-pulse" />
       <div className="absolute bottom-1/4 -right-20 w-80 h-80 bg-blue-600/10 blur-[120px] rounded-full animate-pulse" />
 
@@ -59,7 +57,6 @@ const Login: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md relative z-10 px-4"
       >
-        {/* Logo Section */}
         <div className="text-center mb-10">
           <Link href="/" className="inline-flex items-center gap-3 mb-6 group">
             <div className="w-16 h-16 bg-amber-600 rounded-[24px] flex items-center justify-center shadow-2xl shadow-amber-600/30 group-hover:scale-110 transition-transform duration-500">
@@ -70,7 +67,6 @@ const Login: React.FC = () => {
           <p className="text-stone-400 font-bold text-xs uppercase tracking-[0.3em]">Authorized Personnel Only</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white/95 backdrop-blur-2xl rounded-[40px] p-10 shadow-2xl border border-white/20">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
@@ -98,7 +94,7 @@ const Login: React.FC = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   className="w-full pl-12 pr-12 py-4 rounded-2xl border-2 border-stone-100 focus:border-amber-500 outline-none transition-all font-bold text-stone-900"
-                  placeholder="••••••••"
+                  placeholder="Minimum 6 characters"
                 />
                 <button
                   type="button"
@@ -141,13 +137,12 @@ const Login: React.FC = () => {
 
           <div className="mt-8 pt-8 border-t border-stone-100 flex flex-col items-center gap-4">
              <Link href="/" className="text-xs font-black text-amber-600 uppercase tracking-widest hover:underline flex items-center gap-2">
-                ← Public Booking Site
+                Public Booking Site
              </Link>
              <p className="text-[9px] font-black opacity-30 uppercase tracking-[0.2em] text-center">Secure Multi-Role Administrative Interface</p>
           </div>
         </div>
 
-        {/* Footer Info */}
         <div className="mt-10 flex justify-center gap-8">
            <div className="flex items-center gap-2">
               <Sparkles className="h-3 w-3 text-amber-500" />

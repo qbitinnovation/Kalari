@@ -7,7 +7,7 @@ import { format } from "date-fns";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { ArrowLeft, CalendarDays, Clock, Printer, Send, Ticket, X } from "lucide-react";
 import { db, Booking, Ticket as TicketType } from "@/lib/database";
-import { getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
+import { getBookingReference, getRecordId, isGeneralAdmissionSeatCode, parseSeatCodes } from "@/lib/booking";
 
 type CustomerSession = {
   id: string;
@@ -22,6 +22,7 @@ type BookingRow = Booking & {
     date: string;
     time: string;
     price: number;
+    type?: "KALARI" | "EVENT";
     description?: string;
   };
 };
@@ -80,6 +81,9 @@ export default function CustomerBookingDetailPage() {
 
   const seats = useMemo(() => parseSeatCodes(booking?.seat_code), [booking]);
   const bookingReference = booking ? getBookingReference(booking) : "";
+  const isEventBooking = booking?.show?.type === "EVENT" || seats.every(isGeneralAdmissionSeatCode);
+  const ticketDisplayValue = isEventBooking ? `GENERAL${tickets.length > 1 ? ` x ${tickets.length}` : ""}` : seats.join(", ");
+  const qrValue = bookingReference;
   const isUpcoming = booking?.show?.date && booking?.show?.time ? new Date(`${booking.show.date}T${booking.show.time}`) >= new Date() : false;
   const canRequestCancel = Boolean(booking && isUpcoming && booking.status === "CONFIRMED" && booking.cancellation_status !== "PENDING");
 
@@ -168,12 +172,12 @@ export default function CustomerBookingDetailPage() {
               <Info label="Date" value={booking.show?.date ? format(new Date(booking.show.date), "EEE, MMM dd, yyyy") : "N/A"} icon={<CalendarDays className="h-4 w-4" />} />
               <Info label="Time" value={booking.show?.time ? format(new Date(`2000-01-01T${booking.show.time}`), "h:mm a") : "N/A"} icon={<Clock className="h-4 w-4" />} />
               <div className="sm:col-span-2">
-                <Info label="Seats / Tickets" value={seats.join(", ") || `${tickets.length} ticket(s)`} />
+                <Info label={isEventBooking ? "Admission" : "Seats"} value={ticketDisplayValue || `${tickets.length} ticket(s)`} />
               </div>
             </div>
 
             <div className="mt-6">
-              <h2 className="mb-3 text-lg font-black">Ticket Codes</h2>
+              <h2 className="mb-3 text-lg font-black">{isEventBooking ? "Tickets" : "Ticket Codes"}</h2>
               <div className="grid gap-2 sm:grid-cols-2">
                 {tickets.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-stone-300 p-4 text-sm font-bold text-stone-500">No ticket rows found for this booking.</div>
@@ -181,8 +185,8 @@ export default function CustomerBookingDetailPage() {
                   tickets.map((ticket) => (
                     <div key={getRecordId(ticket)} className="rounded-lg border border-stone-200 p-4">
                       <div className="text-xs font-black uppercase tracking-wider text-stone-400">Ticket</div>
-                      <div className="mt-1 font-mono text-sm font-black">{ticket.ticket_code}</div>
-                      <div className="mt-2 text-sm font-bold text-stone-500">{ticket.seat_code}</div>
+                      <div className="mt-1 font-mono text-sm font-black">{isEventBooking ? "GENERAL" : ticket.ticket_code}</div>
+                      {!isGeneralAdmissionSeatCode(ticket.seat_code) && <div className="mt-2 text-sm font-bold text-stone-500">{ticket.seat_code}</div>}
                     </div>
                   ))
                 )}
@@ -206,9 +210,9 @@ export default function CustomerBookingDetailPage() {
             <h2 className="text-xl font-black">Entrance QR</h2>
             <p className="mt-2 text-sm font-semibold text-stone-500">Scan this booking at the counter.</p>
             <div className="mx-auto mt-6 w-fit rounded-lg bg-white p-4 shadow-sm ring-1 ring-stone-200">
-              <QRCode value={bookingReference} size={180} />
+              <QRCode value={qrValue} size={180} />
             </div>
-            <div className="mt-4 font-mono text-xs font-black text-stone-500">{bookingReference}</div>
+            <div className="mt-4 font-mono text-xs font-black text-stone-500">{qrValue}</div>
           </aside>
         </section>
       </div>

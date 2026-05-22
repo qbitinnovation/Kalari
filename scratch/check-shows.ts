@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = 'mongodb://root:v9RD4tXRJNNB8hfEvwPfqPNJklUyLHCqqvVP6MLPPB7141bYeC4q7ComrJ7Zj4DJ@187.77.191.143:5454/?directConnection=true';
+const MONGODB_URI = process.env.MONGODB_URI?.trim();
+
+if (!MONGODB_URI) {
+  throw new Error('Please define the MONGODB_URI environment variable');
+}
 
 async function check() {
   await mongoose.connect(MONGODB_URI);

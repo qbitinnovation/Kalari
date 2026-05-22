@@ -8,6 +8,7 @@ import { useDarkMode } from '@/hooks/useDarkMode'
 import { logShowDeletion, logShowCreation, logShowUpdate } from '@/utils/activityLogger'
 import { useAuth } from '@/contexts/AuthContext'
 import { activityImages } from '@/lib/seedData'
+import { isActiveBookingReservation } from '@/lib/booking'
 import { Button, DatePicker, TimePicker, Input, Select, Textarea } from '@/components/ui'
 
 const Shows: React.FC = () => {
@@ -125,8 +126,9 @@ const Shows: React.FC = () => {
         }, 0) || 0
       }
 
-      const { data: bookings } = await db.from('bookings').select('seat_code').eq('show_id', show.id || (show as any)._id).eq('status', 'CONFIRMED')
+      const { data: bookings } = await db.from('bookings').select('seat_code').eq('show_id', show.id || (show as any)._id).in('status', ['CONFIRMED', 'HELD'])
       const bookedSeatsCount = bookings?.reduce((count: number, booking: any) => {
+        if (!isActiveBookingReservation(booking)) return count
         try {
           const seats = JSON.parse(booking.seat_code)
           return count + (Array.isArray(seats) ? seats.length : 1)
@@ -375,7 +377,7 @@ const Shows: React.FC = () => {
             <div className="admin-modal-header">
               <div>
                 <h2 className="admin-modal-title">{editingShow ? 'Edit Show' : 'Add Show'}</h2>
-                <p className="admin-modal-subtitle">Choose a layout for Kalari shows or capacity for event slots.</p>
+                <p className="admin-modal-subtitle">Choose a layout for Kalari shows or a ticket limit for event slots.</p>
               </div>
               <button type="button" onClick={() => setShowModal(false)} className="admin-modal-close" aria-label="Close modal">
                 <X className="h-5 w-5" />
@@ -461,7 +463,7 @@ const Shows: React.FC = () => {
                 />
               ) : (
                 <Input
-                  label="Capacity"
+                  label="Ticket Limit"
                   type="number"
                   value={formData.capacity}
                   onChange={(capacity) => setFormData({ ...formData, capacity })}

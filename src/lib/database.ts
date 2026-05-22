@@ -181,6 +181,8 @@ export interface Customer {
   name: string;
   email?: string;
   phone?: string;
+  password_hash?: string;
+  phone_verified?: boolean;
   address?: string;
   created_at: string;
   updated_at: string;
@@ -198,17 +200,21 @@ export interface Booking {
   agent_id?: string;
   commission_amount?: number;
   payment_method?: string;
-  payment_status?: "PAID" | "COD_PENDING" | "FAILED" | "REFUNDED";
+  payment_status?: "PAID" | "COD_PENDING" | "PAYMENT_PENDING" | "FAILED" | "REFUNDED";
   payment_id?: string;
   razorpay_order_id?: string;
   razorpay_payment_id?: string;
   total_amount?: number;
   booking_time: string;
-  status: "CONFIRMED" | "CANCELLED";
+  status: "CONFIRMED" | "HELD" | "CANCELLED" | "EXPIRED";
+  hold_token?: string;
+  hold_expires_at?: string;
   cancellation_requested?: boolean;
   cancellation_reason?: string;
   cancellation_requested_at?: string;
   cancellation_status?: "NONE" | "PENDING" | "APPROVED" | "REJECTED";
+  cancellation_reviewed_at?: string;
+  cancellation_reviewed_by?: string;
   customer?: Customer;
   show?: Show;
 }
@@ -225,4 +231,22 @@ export interface Ticket {
   generated_by: string;
   generated_at: string;
   status: "ACTIVE" | "COMPLETED" | "REVOKED";
+}
+
+export interface Notification {
+  id: string;
+  _id?: string;
+  type: string;
+  module: string;
+  title: string;
+  message: string;
+  target_roles: ("admin" | "staff" | "agent")[];
+  read_by?: string[];
+  entity_type?: string;
+  entity_id?: string;
+  action_url?: string;
+  severity?: "INFO" | "SUCCESS" | "WARNING" | "ERROR";
+  metadata?: Record<string, any>;
+  created_at: string;
+  updated_at?: string;
 }

@@ -30,7 +30,7 @@ import {
   sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
-import { createBookingReference, createTicketCode, getAvailabilityLabel, getRecordId, parseSeatCodes } from '@/lib/booking'
+import { createBookingReference, createTicketCodes, getAvailabilityLabel, getRecordId, isActiveBookingReservation, parseSeatCodes } from '@/lib/booking'
 
 const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ''
 
@@ -145,10 +145,6 @@ const BookingContent: React.FC = () => {
       .in('status', ['ACTIVE'])
       .gte('date', new Date().toISOString().split('T')[0])
 
-    if (!preselectedActivityId) {
-      query = query.eq('type', 'KALARI')
-    }
-
     const { data, error } = await query
       .order('date', { ascending: true })
 
@@ -162,11 +158,11 @@ const BookingContent: React.FC = () => {
       .from('bookings')
       .select('seat_code')
       .eq('show_id', showId)
-      .eq('status', 'CONFIRMED')
+      .in('status', ['CONFIRMED', 'HELD'])
 
     const nextBooked = new Set<string>()
     data?.forEach((booking: any) => {
-      parseSeatCodes(booking.seat_code).forEach(seat => nextBooked.add(seat))
+      if (isActiveBookingReservation(booking)) parseSeatCodes(booking.seat_code).forEach(seat => nextBooked.add(seat))
     })
     setBookedSeats(nextBooked)
   }
@@ -202,7 +198,7 @@ const BookingContent: React.FC = () => {
 
   const sectionNames = Array.from(new Set(seats.map(seat => seat.section)))
   const totalTickets = selectedShow?.type === 'EVENT' ? eventTicketCount : selectedSeats.length
-  const selectedSeatLabels = selectedShow?.type === 'EVENT' ? `${eventTicketCount} ticket(s)` : selectedSeats.map(id => seats.find(seat => seat.id === id)?.label || id).join(', ')
+  const selectedSeatLabels = selectedShow?.type === 'EVENT' ? `${eventTicketCount} general admission ticket(s)` : selectedSeats.map(id => seats.find(seat => seat.id === id)?.label || id).join(', ')
   const totalAmount = selectedShow ? totalTickets * Number(selectedShow.price || 0) : 0
   const activeIndex = stepLabels.findIndex(item => item.id === step)
   const bookingImages = (shows.map(show => show.image).filter(Boolean) as string[]).slice(0, 3)
@@ -355,22 +351,34 @@ const BookingContent: React.FC = () => {
       .from('bookings')
       .select('seat_code')
       .eq('show_id', getRecordId(selectedShow))
-      .eq('status', 'CONFIRMED')
+      .in('status', ['CONFIRMED', 'HELD'])
 
     const unavailable = new Set<string>()
     data?.forEach((booking: any) => {
-      parseSeatCodes(booking.seat_code).forEach(seat => unavailable.add(seat))
+      if (isActiveBookingReservation(booking)) parseSeatCodes(booking.seat_code).forEach(seat => unavailable.add(seat))
     })
     setBookedSeats(unavailable)
     return unavailable
   }
 
+  const getConfirmedTicketCount = async () => {
+    if (!selectedShow) return 0
+    const { data } = await db
+      .from('bookings')
+      .select('seat_code')
+      .eq('show_id', getRecordId(selectedShow))
+      .in('status', ['CONFIRMED', 'HELD'])
+
+    return data?.reduce((count: number, booking: any) =>
+      count + (isActiveBookingReservation(booking) ? parseSeatCodes(booking.seat_code).length : 0), 0
+    ) || 0
+  }
+
   const verifySeatAvailability = async () => {
     if (!selectedShow) return false
-    const unavailable = await getUnavailableSeats()
-    
+
     if (selectedShow.type === 'EVENT') {
-      const bookedCount = unavailable.size
+      const bookedCount = await getConfirmedTicketCount()
       const capacity = selectedShow.capacity || 1000
       if (bookedCount + eventTicketCount > capacity) {
         setNotice(`Only ${Math.max(0, capacity - bookedCount)} tickets left. Please reduce your quantity.`)
@@ -379,6 +387,7 @@ const BookingContent: React.FC = () => {
       return true
     }
 
+    const unavailable = await getUnavailableSeats()
     const conflicts = selectedSeats.filter(seat => unavailable.has(seat))
     if (conflicts.length) {
       setNotice(`These seats were just booked: ${conflicts.join(', ')}. Choose another seat.`)
@@ -415,8 +424,9 @@ const BookingContent: React.FC = () => {
     
     let seatCodesToSave = selectedSeats
     if (selectedShow.type === 'EVENT') {
-      seatCodesToSave = Array.from({ length: eventTicketCount }).map((_, i) => `EVT-${Date.now()}-${i + 1}`)
+      seatCodesToSave = Array.from({ length: eventTicketCount }).map(() => 'GENERAL')
     }
+    const generatedTicketCodes = createTicketCodes(seatCodesToSave.length, new Date(now))
 
     const { data: bookings, error: bookingError } = await db.from('bookings').insert([{
       booking_reference: bookingReference,
@@ -438,11 +448,11 @@ const BookingContent: React.FC = () => {
     if (bookingError || !bookings?.[0]) throw new Error(bookingError?.message || 'Booking could not be saved.')
     const savedBookingId = getRecordId(bookings[0])
 
-    const generatedTickets = seatCodesToSave.map(seatCode => ({
+    const generatedTickets = seatCodesToSave.map((seatCode, index) => ({
       booking_id: savedBookingId,
       show_id: getRecordId(selectedShow),
       seat_code: seatCode,
-      ticket_code: createTicketCode(),
+      ticket_code: generatedTicketCodes[index],
       price: Number(selectedShow.price || 0),
       generated_by: form.name.trim(),
       generated_at: now,
@@ -452,10 +462,74 @@ const BookingContent: React.FC = () => {
     const { error: ticketError } = await db.from('tickets').insert(generatedTickets)
 
     if (ticketError) throw new Error(ticketError.message || 'Tickets could not be created.')
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'NEW_BOOKING',
+        module: 'BOOKING',
+        title: 'New website booking',
+        message: `${bookingReference} was booked for ${selectedShow.title}.`,
+        severity: 'SUCCESS',
+        entity_type: 'booking',
+        entity_id: savedBookingId,
+        action_url: '/admin/tickets',
+        metadata: { booking_reference: bookingReference, show_id: getRecordId(selectedShow) },
+      }),
+    }).catch(() => null)
     setBookingId(savedBookingId)
     setBookingReference(bookingReference)
     setTicketCodes(generatedTickets.map(ticket => ticket.ticket_code))
     setPaymentStatus(status)
+    setStep('success')
+  }
+
+  const createPaymentHold = async () => {
+    if (!selectedShow) throw new Error('No show selected.')
+    const response = await fetch('/api/booking-holds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        showId: getRecordId(selectedShow),
+        seatCodes: selectedShow.type === 'EVENT' ? [] : selectedSeats,
+        ticketCount: selectedShow.type === 'EVENT' ? eventTicketCount : selectedSeats.length,
+        form,
+      }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload.data?.hold_token) throw new Error(payload.error || 'Could not hold selected seats.')
+    return payload.data
+  }
+
+  const releasePaymentHold = async (token: string) => {
+    if (!token) return
+    await fetch('/api/booking-holds', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'RELEASE', holdToken: token }),
+    }).catch(() => null)
+  }
+
+  const confirmPaymentHold = async (token: string, paymentId: string, razorpayOrderId: string, razorpaySignature: string) => {
+    const response = await fetch('/api/booking-holds', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'CONFIRM',
+        holdToken: token,
+        paymentId,
+        razorpayOrderId,
+        razorpaySignature,
+      }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload.data?.booking) throw new Error(payload.error || 'Paid booking could not be confirmed.')
+    const booking = payload.data.booking
+    const generatedTickets = payload.data.tickets || []
+    setBookingId(getRecordId(booking))
+    setBookingReference(booking.booking_reference || '')
+    setTicketCodes(generatedTickets.map((ticket: any) => ticket.ticket_code))
+    setPaymentStatus('PAID')
     setStep('success')
   }
 
@@ -468,14 +542,19 @@ const BookingContent: React.FC = () => {
 
     setLoading(true)
     setNotice('')
+    let activeHoldToken = ''
+    let verifiedPayment = false
     try {
       if (!(await verifySeatAvailability())) return
       if (!(await loadRazorpayScript())) throw new Error('Could not load Razorpay checkout.')
+      const hold = await createPaymentHold()
+      activeHoldToken = hold.hold_token
+      setNotice(`Your selection is held for ${hold.hold_minutes || 10} minutes while payment completes.`)
 
       const orderResponse = await fetch(`/api/payment/create-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: totalAmount, currency: 'INR', receipt: `booking_${Date.now()}` }),
+        body: JSON.stringify({ amount: totalAmount, currency: 'INR', receipt: hold.booking_reference || `booking_${Date.now()}` }),
       })
       const orderPayload = await orderResponse.json().catch(() => ({}))
       if (!orderResponse.ok || !orderPayload.data?.id) throw new Error(orderPayload.error || 'Could not create Razorpay order.')
@@ -499,7 +578,9 @@ const BookingContent: React.FC = () => {
               })
               const verifyPayload = await verifyResponse.json().catch(() => ({}))
               if (!verifyResponse.ok || !verifyPayload.data?.valid) return reject(new Error(verifyPayload.error || 'Payment verification failed.'))
-              await saveBooking(response.razorpay_payment_id, 'razorpay', 'PAID', response.razorpay_order_id)
+              verifiedPayment = true
+              await confirmPaymentHold(activeHoldToken, response.razorpay_payment_id, response.razorpay_order_id, response.razorpay_signature)
+              activeHoldToken = ''
               resolve()
             } catch (error) {
               reject(error)
@@ -510,7 +591,13 @@ const BookingContent: React.FC = () => {
         checkout.open()
       })
     } catch (error: any) {
-      if (error?.message !== 'Payment cancelled.') setNotice(error?.message || 'Payment failed.')
+      if (activeHoldToken && !verifiedPayment) {
+        await releasePaymentHold(activeHoldToken)
+        await fetchBookedSeats(getRecordId(selectedShow))
+      }
+      setNotice(error?.message === 'Payment cancelled.'
+        ? 'Payment cancelled. Your temporary hold was released.'
+        : error?.message || 'Payment failed.')
     } finally {
       setLoading(false)
     }
@@ -601,7 +688,7 @@ const BookingContent: React.FC = () => {
                 ) : shows.filter(show => (!preselectedDate || show.date === preselectedDate) && (!preselectedActivityId || (show as any).activity_id === preselectedActivityId)).map(show => (
                   <button
                     key={getRecordId(show)}
-                    onClick={() => { if (show.availability_status !== 'SOLD_OUT') { setSelectedShow(show); setSelectedSeats([]); setStep('seats') } }}
+                    onClick={() => { if (show.availability_status !== 'SOLD_OUT') { setSelectedShow(show); setSelectedSeats([]); setEventTicketCount(1); setStep('seats') } }}
                     disabled={show.availability_status === 'SOLD_OUT'}
                     className="group flex h-full min-h-[445px] w-full max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg bg-white text-left shadow-sm ring-1 ring-stone-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-70 md:max-w-none"
                   >
@@ -729,8 +816,11 @@ const BookingContent: React.FC = () => {
                   <Info label="Payment" value={paymentStatus === 'PAID' ? 'Paid via Razorpay' : 'COD pending'} />
                   <Info label="Guest" value={form.name} />
                   <Info label="Total" value={`Rs. ${totalAmount}`} />
-                  <div className="sm:col-span-2"><Info label="Seats" value={selectedSeatLabels} /></div>
-                  {ticketCodes.length > 0 && <div className="sm:col-span-2"><Info label="Ticket Codes" value={ticketCodes.join(', ')} mono /></div>}
+                  <div className="sm:col-span-2"><Info label={selectedShow.type === 'EVENT' ? 'Tickets' : 'Seats'} value={selectedSeatLabels} /></div>
+                  {selectedShow.type === 'EVENT'
+                    ? <div className="sm:col-span-2"><Info label="Admission" value={`GENERAL${ticketCodes.length > 1 ? ` x ${ticketCodes.length}` : ''}`} /></div>
+                    : ticketCodes.length > 0 && <div className="sm:col-span-2"><Info label="Ticket Codes" value={ticketCodes.join(', ')} mono /></div>
+                  }
                 </div>
                 <div className="mx-auto mt-6 flex w-fit rounded-lg bg-white p-3 shadow-sm">
                   <QRCode value={bookingReference || bookingId} size={132} />
@@ -780,7 +870,7 @@ const Summary: React.FC<{ show: Show; selectedSeatLabels: string; selectedSeats:
           <span className="inline-flex items-center gap-1"><Clock className="h-4 w-4" /> {format(new Date(`2000-01-01T${show.time}`), 'h:mm a')}</span>
           <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4" /> Kovalam</span>
         </div>
-        {selectedSeatLabels && <div className="mt-3 text-sm font-bold text-stone-800">Seats: {selectedSeatLabels}</div>}
+        {selectedSeatLabels && <div className="mt-3 text-sm font-bold text-stone-800">{show.type === 'EVENT' ? 'Tickets' : 'Seats'}: {selectedSeatLabels}</div>}
       </div>
       <div className="min-w-[120px] text-left sm:text-right">
         <div className="text-sm font-bold text-stone-500">{selectedSeats} ticket(s)</div>

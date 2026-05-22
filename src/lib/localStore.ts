@@ -13,6 +13,7 @@ const initialStore = (): Store => {
   return {
     users: [
       { id: "user-admin", email: "admin@kalari.local", password: "admin123", role: "admin", full_name: "Kalari Admin", active: true, created_at: now },
+      { id: "user-staff", email: "staff@kalari.local", password: "staff123", role: "staff", full_name: "Kalari Staff", active: true, created_at: now },
       { id: "user-agent", email: "agent@kalari.local", password: "admin123", role: "agent", full_name: "Booking Agent", commission_percentage: AGENT_DEFAULT_COMMISSION_PERCENTAGE, active: true, created_at: now },
     ],
     activities: seed.activities,
@@ -21,6 +22,7 @@ const initialStore = (): Store => {
     customers: [],
     bookings: [],
     tickets: [],
+    notifications: [],
     activity_logs: [],
   };
 };
@@ -58,7 +60,7 @@ const attachRelations = (store: Store, collection: string, rowsOrRow: any) => {
     const layoutsById = new Map((store.layouts || []).map((layout) => [String(recordId(layout)), layout]));
     rows.forEach((show) => {
       if (show.layout_id) show.layout = layoutsById.get(String(show.layout_id)) || null;
-      const showBookings = (store.bookings || []).filter((booking) => booking.show_id === String(recordId(show)) && booking.status === "CONFIRMED");
+      const showBookings = (store.bookings || []).filter((booking) => booking.show_id === String(recordId(show)));
       const capacity = getShowCapacity(show);
       const booked = countBookedSeats(showBookings);
       show.booked_count = booked;
