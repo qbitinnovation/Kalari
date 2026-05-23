@@ -7,6 +7,16 @@ export function parseDateValue(value: string): Date | undefined {
   return isValid(parsed) ? parsed : undefined
 }
 
+export function formatDisplayDateValue(value: string | Date | null | undefined, fallback = 'Date not set'): string {
+  if (!value) return fallback
+  const parsed = value instanceof Date
+    ? value
+    : /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? parseDateValue(value)
+      : new Date(value)
+  return parsed && isValid(parsed) ? format(parsed, 'MMM dd, yyyy') : fallback
+}
+
 /** Format Date to yyyy-MM-dd. */
 export function formatDateValue(date: Date): string {
   return format(date, 'yyyy-MM-dd')
@@ -29,6 +39,13 @@ export function parseTimeValue(value: string): { hours: number; minutes: number 
 
 export function formatTimeValue(hours: number, minutes: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+export function formatDisplayTimeValue(value?: string | null, fallback = 'Time not set'): string {
+  const parsed = parseTimeValue(value || '')
+  if (!parsed) return fallback
+  const date = parse(formatTimeValue(parsed.hours, parsed.minutes), 'HH:mm', new Date())
+  return format(date, 'h:mm a')
 }
 
 export function buildTimeSlots(minuteStep = 15, startHour = 6, endHour = 23): string[] {

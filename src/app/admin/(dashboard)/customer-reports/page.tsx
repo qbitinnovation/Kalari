@@ -6,6 +6,9 @@ import { db, Customer } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
+import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
+import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, SearchInput } from '@/components/ui'
 import {
   UserIcon,
   EnvelopeIcon,
@@ -168,13 +171,43 @@ const CustomerReports: React.FC = () => {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className={`text-2xl sm:text-3xl font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-          Customer Reports
-        </h1>
-        <p className={`mt-2 text-sm sm:text-base transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-          Analyze customer behavior and booking patterns
-        </p>
+      <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className={`text-2xl sm:text-3xl font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+            Customer Reports
+          </h1>
+          <p className={`mt-2 text-sm sm:text-base transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+            Analyze customer behavior and booking patterns
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center xl:w-auto">
+          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search customers..." containerClassName="w-full sm:w-72" />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className={`min-h-11 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors duration-200 ${
+              darkMode
+                ? 'bg-slate-900 border-slate-700 text-slate-100 focus:border-slate-500'
+                : 'bg-white border-slate-200 text-slate-900 focus:border-slate-400'
+            } focus:outline-none focus:ring-[3px] focus:ring-primary-500/20`}
+          >
+            <option value="totalSpent">Sort by Revenue</option>
+            <option value="totalBookings">Sort by Bookings</option>
+            <option value="name">Sort by Name</option>
+            <option value="lastBooking">Sort by Last Booking</option>
+          </select>
+          <button
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            className={`min-h-11 min-w-11 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors duration-200 ${
+              darkMode
+                ? 'bg-slate-900 border-slate-700 text-slate-100 hover:bg-slate-800'
+                : 'bg-white border-slate-200 text-slate-900 hover:bg-slate-50'
+            }`}
+            aria-label={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+          >
+            {sortOrder === 'asc' ? 'â†‘' : 'â†“'}
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -237,7 +270,7 @@ const CustomerReports: React.FC = () => {
       </div>
 
       {/* Filters and Search */}
-      <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+      <div className="hidden">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex-1 max-w-md">
             <div className="relative">
@@ -287,7 +320,7 @@ const CustomerReports: React.FC = () => {
       </div>
 
       {/* Customer Reports Table */}
-      <div className={`rounded-2xl shadow-sm border transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+      <AdminTablePanel>
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
@@ -303,10 +336,8 @@ const CustomerReports: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
-                <thead className={`${darkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
+              <AdminTable>
+                <AdminTableHead>
                   <tr>
                     <th 
                       className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
@@ -339,8 +370,8 @@ const CustomerReports: React.FC = () => {
                       Actions
                     </th>
                   </tr>
-                </thead>
-                <tbody className={`divide-y ${darkMode ? 'divide-slate-700' : 'divide-slate-200'}`}>
+                </AdminTableHead>
+                <AdminTableBody>
                   {filteredAndSortedCustomers.map((customer) => (
                     <motion.tr
                       key={customer.id}
@@ -352,15 +383,15 @@ const CustomerReports: React.FC = () => {
                         <div className="flex items-center">
                           <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center">
                             <span className="text-white font-medium text-sm">
-                              {customer.name.charAt(0).toUpperCase()}
+                              {toDisplayInitial(customer.name)}
                             </span>
                           </div>
                           <div className="ml-4">
                             <div className={`text-sm font-medium ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                              {customer.name}
+                              {toDisplayTitle(customer.name)}
                             </div>
                             <div className={`text-xs ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                              Customer since {format(new Date(customer.created_at), 'MMM yyyy')}
+                              Customer since {formatDisplayDateValue(customer.created_at)}
                             </div>
                           </div>
                         </div>
@@ -409,7 +440,7 @@ const CustomerReports: React.FC = () => {
                         {customer.analytics.lastBooking ? (
                           <div className="space-y-1">
                             <div className={`text-sm ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {format(new Date(customer.analytics.lastBooking), 'MMM dd, yyyy')}
+                              {formatDisplayDateValue(customer.analytics.lastBooking)}
                             </div>
                             <div className={`text-xs ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                               {format(new Date(customer.analytics.lastBooking), 'h:mm a')}
@@ -432,12 +463,10 @@ const CustomerReports: React.FC = () => {
                       </td>
                     </motion.tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </AdminTableBody>
+              </AdminTable>
         )}
-      </div>
+      </AdminTablePanel>
     </div>
   )
 }

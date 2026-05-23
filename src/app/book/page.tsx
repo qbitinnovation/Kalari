@@ -21,6 +21,7 @@ import {
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { db } from '@/lib/database'
 import { Input } from '@/components/ui'
+import { formatDisplayDateValue, formatDisplayTimeValue } from '@/components/ui/date-utils'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
@@ -30,7 +31,7 @@ import {
   sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
-import { createBookingReference, createTicketCodes, getAvailabilityLabel, getRecordId, isActiveBookingReservation, parseSeatCodes } from '@/lib/booking'
+import { createBookingReference, createTicketCodes, getAvailabilityLabel, getRecordId, isActiveBookingReservation, isShowBookableAt, parseSeatCodes } from '@/lib/booking'
 
 const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ''
 
@@ -67,6 +68,7 @@ interface Show {
   layout?: { structure: any }
   type?: 'KALARI' | 'EVENT'
   capacity?: number
+  agent_id?: string
 }
 
 interface SeatOption {
@@ -100,6 +102,7 @@ const BookingContent: React.FC = () => {
   const preselectedShowId = searchParams.get('show')
   const preselectedActivityId = searchParams.get('activity')
   const preselectedDate = searchParams.get('date') || ''
+  const validPreselectedShowId = preselectedShowId && preselectedShowId !== 'undefined' && preselectedShowId !== 'null' ? preselectedShowId : ''
   const [shows, setShows] = useState<Show[]>([])
   const [selectedShow, setSelectedShow] = useState<Show | null>(null)
   const [bookedSeats, setBookedSeats] = useState<Set<string>>(new Set())
@@ -126,16 +129,18 @@ const BookingContent: React.FC = () => {
   }, [selectedShow])
 
   useEffect(() => {
-    if (preselectedShowId && shows.length > 0) {
-      const show = shows.find(item => getRecordId(item) === preselectedShowId)
-      if (show) {
-        setSelectedShow(show)
-        setSelectedSeats([])
-        setEventTicketCount(1)
-        setStep('seats')
-      }
-    }
-  }, [preselectedShowId, shows])
+    if (!validPreselectedShowId || shows.length === 0) return
+
+    const show = shows.find(item => getRecordId(item) === validPreselectedShowId)
+    if (!show) return
+
+    if (selectedShow && getRecordId(selectedShow) === getRecordId(show)) return
+
+    setSelectedShow(show)
+    setSelectedSeats([])
+    setEventTicketCount(1)
+    setStep('seats')
+  }, [selectedShow, shows, validPreselectedShowId])
 
   const fetchShows = async () => {
     setShowsLoading(true)
@@ -149,7 +154,7 @@ const BookingContent: React.FC = () => {
       .order('date', { ascending: true })
 
     if (error) setNotice(error.message || 'Unable to load shows.')
-    setShows(data || [])
+    setShows((data || []).filter((show: Show) => isShowBookableAt(show)))
     setShowsLoading(false)
   }
 
@@ -217,18 +222,49 @@ const BookingContent: React.FC = () => {
     }, {})
   }
 
-  const renderSeatButton = (seat: SeatOption) => {
+  const renderSeatButton = (seat: SeatOption, dense = false, side: ArenaSide = 'top') => {
     const blockedSeats = selectedShow?.layout?.structure?.blockedSeats || []
     const isBooked = bookedSeats.has(seat.id) || blockedSeats.includes(seat.id)
     const isSelected = selectedSeats.includes(seat.id)
+    const facingClass =
+      side === 'bottom' ? 'rotate-180'
+        : side === 'left' ? '-rotate-90'
+          : side === 'right' ? 'rotate-90'
+            : ''
+    const sizeClass = 'h-7 w-8'
+    const seatTone = isBooked
+      ? {
+          shell: 'border-red-200 bg-red-50 opacity-70',
+          back: 'border-red-200 bg-red-100',
+          base: 'border-red-200 bg-red-100',
+          legs: 'bg-red-200',
+        }
+      : isSelected
+        ? {
+            shell: 'border-amber-700/50 bg-amber-50 shadow-md',
+            back: 'border-amber-700/50 bg-amber-400',
+            base: 'border-amber-700/50 bg-amber-500',
+            legs: 'bg-amber-700/60',
+          }
+        : {
+            shell: 'border-[#5d7892]/35 bg-sky-50 hover:border-emerald-500 hover:bg-emerald-50',
+            back: 'border-[#49687f] bg-[#8db5d4]',
+            base: 'border-[#49687f] bg-[#6f9fc2]',
+            legs: 'bg-[#49687f]',
+          }
     return (
       <button
         key={seat.id}
         onClick={() => toggleSeat(seat.id)}
         disabled={isBooked}
-        className={`h-8 w-9 rounded-lg border text-[10px] font-bold transition ${isBooked ? 'cursor-not-allowed border-red-200 bg-red-50 text-red-300' : isSelected ? 'border-amber-500 bg-amber-400 text-stone-950 shadow-md' : 'border-stone-200 bg-white text-stone-700 hover:border-emerald-500 hover:bg-emerald-50'}`}
+        aria-label={`${seat.label} seat`}
+        title={seat.label}
+        className={`${sizeClass} ${facingClass} relative rounded-md border transition ${isBooked ? 'cursor-not-allowed' : ''} ${seatTone.shell}`}
       >
-        {seat.label}
+        <span className={`absolute left-1/2 top-[2px] h-[14px] w-[20px] -translate-x-1/2 rounded-t-md rounded-b-[3px] border ${seatTone.back}`} />
+        <span className={`absolute bottom-[5px] left-1/2 h-[5px] w-[23px] -translate-x-1/2 rounded-[2px] border ${seatTone.base}`} />
+        <span className={`absolute bottom-[2px] left-[7px] h-[4px] w-[2px] rounded-full ${seatTone.legs}`} />
+        <span className={`absolute bottom-[2px] right-[7px] h-[4px] w-[2px] rounded-full ${seatTone.legs}`} />
       </button>
     )
   }
@@ -246,43 +282,47 @@ const BookingContent: React.FC = () => {
 
     const renderSideColumns = () => (
       <div
-        className="grid h-full content-center justify-center gap-2"
-        style={{ gridTemplateColumns: `repeat(${sideRows.length}, minmax(36px, 44px))` }}
+        className="grid h-full content-center justify-center gap-1"
+        style={{ gridTemplateColumns: `repeat(${sideRows.length}, minmax(24px, 28px))` }}
       >
         {sideRows.map((rowSeats, rowIndex) => (
-          <div key={`${side}-${rowSeats[0]?.row || rowIndex}`} className="flex flex-col items-center gap-2">
-            <span className="text-center text-xs font-bold text-stone-400">
+          <div key={`${side}-${rowSeats[0]?.row || rowIndex}`} className="flex flex-col items-center gap-1">
+            <span className="text-center text-[10px] font-bold leading-none text-stone-400">
               {rowSeats[0]?.row || String.fromCharCode(65 + rowIndex)}
             </span>
             {Array.from({ length: maxSeatsInSide }, (_, seatIndex) => {
               const seat = rowSeats[seatIndex]
-              return seat ? renderSeatButton(seat) : <span key={`${side}-${rowIndex}-${seatIndex}`} className="h-8 w-9" />
+              return seat ? renderSeatButton(seat, true, side) : <span key={`${side}-${rowIndex}-${seatIndex}`} className="h-7 w-8" />
             })}
           </div>
         ))}
       </div>
     )
 
+    const compactWrapperClass = side === 'top' || side === 'bottom'
+      ? 'mx-auto w-fit max-w-full'
+      : 'h-[390px] w-[146px] sm:h-[410px] sm:w-[152px] lg:h-[430px] lg:w-[156px]'
+
     return (
-      <div className="rounded-lg border border-stone-200 bg-white/80 p-3 shadow-sm">
+      <div className={`rounded-lg border border-stone-200 bg-white/80 px-3.5 py-3 shadow-sm ${compactWrapperClass}`}>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-xs font-black uppercase tracking-wider text-stone-500">{sideLabelForArenaSide(side)}</h3>
-          <span className="rounded-full bg-stone-100 px-2 py-1 text-xs font-black text-stone-600 ring-1 ring-stone-200">
+          <h3 className="text-[10px] font-black uppercase tracking-wider text-stone-500 sm:text-xs">{sideLabelForArenaSide(side)}</h3>
+          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-black text-stone-600 ring-1 ring-stone-200 sm:py-1 sm:text-xs">
             {arrowForArenaSide(side)}
           </span>
         </div>
-        <div className="overflow-x-auto pb-1">
+        <div className="overflow-visible pb-1">
           {isSide ? renderSideColumns() : (
-            <div className="mx-auto min-w-max space-y-2">
+            <div className="mx-auto min-w-max space-y-1.5">
               {rows.map((rowSeats, index) => (
               <div
                 key={`${side}-${rowSeats[0]?.row || index}`}
-                className={`flex items-center gap-2 ${alignClassForArenaSide(side)}`}
+                className={`flex items-center gap-1.5 ${alignClassForArenaSide(side)}`}
               >
-                <span className="w-6 shrink-0 text-center text-xs font-bold text-stone-400">
+                <span className="w-4 shrink-0 text-center text-[10px] font-bold text-stone-400">
                   {rowSeats[0]?.row || String.fromCharCode(65 + index)}
                 </span>
-                {rowSeats.map(renderSeatButton)}
+                {rowSeats.map(seat => renderSeatButton(seat, false, side))}
               </div>
               ))}
             </div>
@@ -294,16 +334,16 @@ const BookingContent: React.FC = () => {
 
   const renderGuestKalariSeatMap = () => {
     const renderArenaCenter = () => (
-      <div className="flex flex-col items-center justify-center gap-3">
-          <div className="relative flex aspect-square w-[390px] items-center justify-center overflow-hidden rounded-lg border-4 border-[#8b5a2b]/30 bg-[#b8793b] shadow-inner">
+      <div className="flex flex-col items-center justify-center gap-1.5">
+          <div className="relative flex aspect-square w-[390px] items-center justify-center overflow-hidden rounded-lg border-[3px] border-[#8b5a2b]/30 bg-[#b8793b] shadow-inner sm:w-[410px] lg:w-[430px]">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#d6a15f_0%,#b8793b_42%,#8b5a2b_100%)]" />
-          <div className="absolute inset-4 rounded-lg border border-[#f3d6a3]/35" />
-          <div className="absolute h-[72%] w-1.5 rotate-45 rounded-full bg-[#6f3f1c]/45" />
-          <div className="absolute h-[72%] w-1.5 -rotate-45 rounded-full bg-[#6f3f1c]/45" />
-          <div className="absolute h-16 w-16 rounded-full border-2 border-[#f3d6a3]/40" />
-          <div className="absolute h-3 w-3 rounded-full bg-[#f3d6a3]/80" />
+          <div className="absolute inset-3 rounded-lg border border-[#f3d6a3]/35" />
+          <div className="absolute h-[72%] w-1 rotate-45 rounded-full bg-[#6f3f1c]/45" />
+          <div className="absolute h-[72%] w-1 -rotate-45 rounded-full bg-[#6f3f1c]/45" />
+          <div className="absolute h-14 w-14 rounded-full border-2 border-[#f3d6a3]/40" />
+          <div className="absolute h-2.5 w-2.5 rounded-full bg-[#f3d6a3]/80" />
         </div>
-        <div className="text-center text-xs font-black uppercase tracking-widest text-stone-500">Ankathattu</div>
+        <div className="text-center text-[10px] font-black uppercase tracking-widest text-stone-500">Ankathattu</div>
       </div>
     )
 
@@ -321,9 +361,9 @@ const BookingContent: React.FC = () => {
           </div>
         </div>
         <div className="overflow-x-auto pb-2">
-          <div className="min-w-[1040px] space-y-5 rounded-lg bg-[#f7f3eb] p-5 ring-1 ring-stone-200">
+          <div className="mx-auto min-w-[980px] w-fit space-y-2 rounded-lg bg-[#f7f3eb] p-3 ring-1 ring-stone-200 sm:min-w-[1040px] sm:space-y-2.5 sm:p-3">
             <div>{renderGuestSeatGroup(arenaSeatGroups.top, 'top')}</div>
-            <div className="grid grid-cols-[260px_430px_260px] items-center justify-center gap-5">
+            <div className="grid grid-cols-[max-content_390px_max-content] items-center justify-center gap-3 sm:grid-cols-[max-content_410px_max-content] lg:grid-cols-[max-content_430px_max-content]">
               <div className="self-stretch">{renderGuestSeatGroup(arenaSeatGroups.left, 'left')}</div>
               {renderArenaCenter()}
               <div className="self-stretch">{renderGuestSeatGroup(arenaSeatGroups.right, 'right')}</div>
@@ -376,6 +416,13 @@ const BookingContent: React.FC = () => {
 
   const verifySeatAvailability = async () => {
     if (!selectedShow) return false
+    if (!isShowBookableAt(selectedShow)) {
+      setNotice('Booking is closed because this show time has passed.')
+      setSelectedShow(null)
+      setStep('show')
+      await fetchShows()
+      return false
+    }
 
     if (selectedShow.type === 'EVENT') {
       const bookedCount = await getConfirmedTicketCount()
@@ -427,6 +474,12 @@ const BookingContent: React.FC = () => {
       seatCodesToSave = Array.from({ length: eventTicketCount }).map(() => 'GENERAL')
     }
     const generatedTicketCodes = createTicketCodes(seatCodesToSave.length, new Date(now))
+    let commissionAmount = 0
+    if (selectedShow.type === 'EVENT' && selectedShow.agent_id) {
+      const { data: linkedAgents } = await db.from('users').select('commission_percentage').eq('id', selectedShow.agent_id)
+      const commissionPercentage = Number(linkedAgents?.[0]?.commission_percentage || 0)
+      commissionAmount = (totalAmount * commissionPercentage) / 100
+    }
 
     const { data: bookings, error: bookingError } = await db.from('bookings').insert([{
       booking_reference: bookingReference,
@@ -442,6 +495,8 @@ const BookingContent: React.FC = () => {
       payment_method: method === 'cod' ? 'COD' : 'RAZORPAY',
       payment_status: status,
       total_amount: totalAmount,
+      agent_id: selectedShow.type === 'EVENT' ? selectedShow.agent_id || null : null,
+      commission_amount: commissionAmount,
       cancellation_status: 'NONE',
     }])
 
@@ -617,9 +672,9 @@ const BookingContent: React.FC = () => {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-stone-950 text-stone-950">
-      <div className="grid min-h-screen min-w-0 lg:grid-cols-[minmax(420px,42vw)_1fr]">
-        <section className="sticky top-0 hidden h-screen overflow-hidden lg:block">
+    <main className="min-h-screen overflow-x-hidden bg-stone-950 text-stone-950 print:bg-white">
+      <div className="grid min-h-screen min-w-0 lg:grid-cols-[minmax(420px,42vw)_1fr] print:block print:min-h-0">
+        <section className="sticky top-0 hidden h-screen overflow-hidden lg:block print:hidden">
           <img src={heroImage} alt="Kalary booking" className="absolute inset-0 h-full w-full object-cover object-[50%_68%]" />
           <div className="absolute inset-0 bg-gradient-to-t from-stone-950 via-stone-950/35 to-transparent" />
           <div className="absolute inset-x-0 bottom-0 p-10 text-white">
@@ -639,9 +694,9 @@ const BookingContent: React.FC = () => {
           </div>
         </section>
 
-        <section className="min-w-0 overflow-x-hidden bg-[#f7f3eb] lg:h-screen lg:overflow-y-auto">
-          <div className="mx-auto w-full max-w-5xl min-w-0 px-4 py-5 sm:px-6 lg:px-10">
-            <div className="mb-5 overflow-hidden rounded-lg bg-stone-950 text-white lg:hidden">
+        <section className="min-w-0 overflow-x-hidden bg-[#f7f3eb] lg:h-screen lg:overflow-y-auto print:h-auto print:bg-white print:overflow-visible">
+          <div className="mx-auto w-full max-w-5xl min-w-0 px-4 py-5 sm:px-6 lg:px-10 print:max-w-none print:p-0">
+            <div className="mb-5 overflow-hidden rounded-lg bg-stone-950 text-white lg:hidden print:hidden">
               <img src={heroImage} alt="Kalary booking" className="h-56 w-full object-cover object-[50%_68%] opacity-80" />
               <div className="p-5">
                 <h1 className="text-3xl font-bold">Book Experiences</h1>
@@ -649,7 +704,7 @@ const BookingContent: React.FC = () => {
               </div>
             </div>
 
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 print:hidden">
               <div>
                 <p className="text-sm font-bold uppercase tracking-wider text-emerald-800">Kovalam, Kerala</p>
                 <h2 className="text-3xl font-bold text-stone-950">Book your experience</h2>
@@ -660,7 +715,7 @@ const BookingContent: React.FC = () => {
               </div>
             </div>
 
-            <div className="mb-5 grid w-full grid-cols-2 gap-2 overflow-hidden rounded-lg bg-white p-2 shadow-sm sm:grid-cols-4">
+            <div className="mb-5 grid w-full grid-cols-2 gap-2 overflow-hidden rounded-lg bg-white p-2 shadow-sm sm:grid-cols-4 print:hidden">
               {stepLabels.map((item, index) => {
                 const done = activeIndex > index || step === 'success'
                 const active = activeIndex === index
@@ -673,7 +728,7 @@ const BookingContent: React.FC = () => {
               })}
             </div>
 
-            {notice && <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">{notice}</div>}
+            {notice && <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900 print:hidden">{notice}</div>}
 
             {step === 'show' && (
               <div className="grid min-w-0 gap-4 md:grid-cols-2">
@@ -701,8 +756,8 @@ const BookingContent: React.FC = () => {
                         <span className={`truncate rounded-full px-3 py-1 text-center sm:text-left ${show.availability_status === 'SOLD_OUT' ? 'bg-red-50 text-red-800' : show.availability_status === 'FILLING_FAST' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>
                           {getAvailabilityLabel(show.availability_status || 'AVAILABLE')}
                         </span>
-                        <span className="truncate rounded-full bg-stone-100 px-3 py-1 text-center text-stone-800 sm:text-left">{format(new Date(show.date), 'EEE, MMM dd')}</span>
-                        <span className="truncate rounded-full bg-sky-50 px-3 py-1 text-center text-sky-800 sm:text-left">{format(new Date(`2000-01-01T${show.time}`), 'h:mm a')}</span>
+                        <span className="truncate rounded-full bg-stone-100 px-3 py-1 text-center text-stone-800 sm:text-left">{formatDisplayDateValue(show.date)}</span>
+                        <span className="truncate rounded-full bg-sky-50 px-3 py-1 text-center text-sky-800 sm:text-left">{formatDisplayTimeValue(show.time)}</span>
                       </div>
                       <h3 className="text-xl font-bold leading-snug">{show.title}</h3>
                       <p className="mt-2 text-sm leading-6 text-stone-600">{show.description || 'Reserved seating for an authentic Kalari live show.'}</p>
@@ -805,7 +860,21 @@ const BookingContent: React.FC = () => {
             )}
 
             {step === 'success' && selectedShow && (
-              <div className="rounded-lg bg-white p-8 text-center shadow-sm ring-1 ring-stone-200">
+              <>
+              <BookingPrintTicket
+                bookingReference={bookingReference || bookingId}
+                showTitle={selectedShow.title}
+                date={formatDisplayDateValue(selectedShow.date, 'N/A')}
+                time={formatDisplayTimeValue(selectedShow.time, 'N/A')}
+                guestName={form.name}
+                admissionLabel={selectedShow.type === 'EVENT' ? 'Admission' : 'Seats'}
+                admissionValue={selectedShow.type === 'EVENT' ? `GENERAL${ticketCodes.length > 1 ? ` x ${ticketCodes.length}` : ''}` : selectedSeatLabels}
+                quantity={`${totalTickets} ticket(s)`}
+                total={`Rs. ${totalAmount}`}
+                payment={paymentStatus === 'PAID' ? 'Paid via Razorpay' : 'COD pending'}
+                qrValue={bookingReference || bookingId}
+              />
+              <div className="rounded-lg bg-white p-8 text-center shadow-sm ring-1 ring-stone-200 print:hidden">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-lg bg-emerald-600 text-white">
                   <CheckCircle2 className="h-9 w-9" />
                 </div>
@@ -830,6 +899,7 @@ const BookingContent: React.FC = () => {
                   <button onClick={() => window.location.reload()} className="rounded-lg bg-stone-950 px-6 py-3 font-bold text-white">Book another ticket</button>
                 </div>
               </div>
+              </>
             )}
           </div>
         </section>
@@ -850,6 +920,68 @@ const PublicBooking: React.FC = () => {
   )
 }
 
+const BookingPrintTicket = ({
+  bookingReference,
+  showTitle,
+  date,
+  time,
+  guestName,
+  admissionLabel,
+  admissionValue,
+  quantity,
+  total,
+  payment,
+  qrValue,
+}: {
+  bookingReference: string
+  showTitle: string
+  date: string
+  time: string
+  guestName: string
+  admissionLabel: string
+  admissionValue: string
+  quantity: string
+  total: string
+  payment: string
+  qrValue: string
+}) => (
+  <section className="hidden print:block">
+    <div className="mx-auto w-[180mm] rounded-lg border border-stone-300 p-8 text-stone-950">
+      <div className="flex items-start justify-between gap-8 border-b border-stone-200 pb-5">
+        <div className="flex items-start gap-4">
+          <img src="/logo.png" alt="Kovalam Kalari" className="h-16 w-16 rounded object-contain" />
+          <div>
+            <div className="text-sm font-black uppercase tracking-[0.25em] text-amber-700">Kovalam Kalari</div>
+            <h1 className="mt-3 text-3xl font-black leading-tight">{showTitle}</h1>
+            <p className="mt-2 font-mono text-sm font-black text-stone-500">{bookingReference}</p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-stone-200 p-3">
+          <QRCode value={qrValue} size={118} />
+        </div>
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-x-10 gap-y-5 text-sm">
+        <PrintField label="Guest" value={guestName} />
+        <PrintField label="Payment" value={payment} />
+        <PrintField label="Date" value={date} />
+        <PrintField label="Time" value={time} />
+        <PrintField label={admissionLabel} value={admissionValue} />
+        <PrintField label="Quantity" value={quantity} />
+        <PrintField label="Total" value={total} />
+        <PrintField label="QR Value" value={qrValue} mono />
+      </div>
+    </div>
+  </section>
+)
+
+const PrintField = ({ label, value, mono }: { label: string; value: string; mono?: boolean }) => (
+  <div>
+    <div className="text-[10px] font-black uppercase tracking-[0.2em] text-stone-400">{label}</div>
+    <div className={`mt-1 text-base font-black ${mono ? 'font-mono' : ''}`}>{value}</div>
+  </div>
+)
+
 const TopBar: React.FC<{ title: string; onBack: () => void }> = ({ title, onBack }) => (
   <div className="mb-4 flex items-center justify-between gap-3">
     <h3 className="min-w-0 text-2xl font-bold leading-tight">{title}</h3>
@@ -866,8 +998,8 @@ const Summary: React.FC<{ show: Show; selectedSeatLabels: string; selectedSeats:
       <div className="min-w-0 flex-1">
         <h4 className="font-bold">{show.title}</h4>
         <div className="mt-2 flex flex-wrap gap-3 text-sm text-stone-600">
-          <span className="inline-flex items-center gap-1"><CalendarDays className="h-4 w-4" /> {format(new Date(show.date), 'EEE, MMM dd')}</span>
-          <span className="inline-flex items-center gap-1"><Clock className="h-4 w-4" /> {format(new Date(`2000-01-01T${show.time}`), 'h:mm a')}</span>
+          <span className="inline-flex items-center gap-1"><CalendarDays className="h-4 w-4" /> {formatDisplayDateValue(show.date)}</span>
+          <span className="inline-flex items-center gap-1"><Clock className="h-4 w-4" /> {formatDisplayTimeValue(show.time)}</span>
           <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4" /> Kovalam</span>
         </div>
         {selectedSeatLabels && <div className="mt-3 text-sm font-bold text-stone-800">{show.type === 'EVENT' ? 'Tickets' : 'Seats'}: {selectedSeatLabels}</div>}

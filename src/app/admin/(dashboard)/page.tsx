@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useDashboard } from '@/contexts/DashboardContext'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
 
 interface ActivityLog {
   id: string
@@ -156,7 +157,7 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="text-right">
               <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>Today</div>
-              <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>{new Date().toLocaleDateString()}</div>
+              <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>{formatDisplayDateValue(new Date())}</div>
             </div>
           </div>
           <div>
@@ -236,7 +237,7 @@ const Dashboard: React.FC = () => {
                     </div>
                     <div className={`flex items-center text-sm mb-3 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                       <CalendarDaysIcon className="h-4 w-4 mr-1" />
-                      {new Date(event.date).toLocaleDateString()} at {event.time}
+                      {formatDisplayDateValue(event.date)} at {event.time}
                     </div>
                     <div className="flex items-center justify-between mb-2">
                       <span className={`text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Bookings</span>

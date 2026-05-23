@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logBookingCreation } from '@/utils/activityLogger'
-import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, isActiveBookingReservation, parseSeatCodes } from '@/lib/booking'
+import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, isActiveBookingReservation, isShowBookableAt, parseSeatCodes } from '@/lib/booking'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
@@ -16,9 +16,10 @@ import {
   sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
-import { useAuth } from '@/contexts/AuthContext'
 import { CalendarDays, Clock, IndianRupee, Ticket, X } from 'lucide-react'
-import { Button, DatePicker, Input, Select } from '@/components/ui'
+import { Button, DatePicker, Input } from '@/components/ui'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
+import { toDisplayTitle } from '@/lib/textFormat'
 
 interface SeatData {
   id: string
@@ -59,9 +60,7 @@ const Booking: React.FC = () => {
   const [checkoutCustomerName, setCheckoutCustomerName] = useState('')
   const [checkoutCustomerError, setCheckoutCustomerError] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('')
   const darkMode = useDarkMode()
-  const { user } = useAuth()
 
   useEffect(() => {
     fetchActiveShows()
@@ -110,7 +109,9 @@ const Booking: React.FC = () => {
       if (error) throw error
       
       const updatedShows = await checkAndUpdateShowStatuses(data || [])
-      const activeShows = updatedShows.filter(show => show.status === 'ACTIVE' || show.status === 'SHOW_STARTED')
+      const activeShows = updatedShows.filter(show =>
+        (show.status === 'ACTIVE' || show.status === 'SHOW_STARTED') && isShowBookableAt(show)
+      )
       
       setAllShows(activeShows)
       setShows(activeShows)
@@ -129,10 +130,6 @@ const Booking: React.FC = () => {
         .order('full_name')
       if (error) throw error
       setAgents(data || [])
-      if (user?.role === 'agent') {
-        const self = (data || []).find((agent: Agent) => recordId(agent) === user.id || agent.email === user.email)
-        if (self) setSelectedAgentId(recordId(self))
-      }
     } catch (error) {
       console.error('Error fetching agents:', error)
     }
@@ -261,6 +258,12 @@ const Booking: React.FC = () => {
 
   const handleContinueBooking = () => {
     if (!selectedShow || getTicketQuantity() === 0) return
+    if (!isShowBookableAt(selectedShow)) {
+      alert('Booking is closed because this show time has passed.')
+      setSelectedShow(null)
+      fetchActiveShows()
+      return
+    }
     setCheckoutCustomerError('')
     setShowCustomerModal(true)
   }
@@ -291,6 +294,9 @@ const Booking: React.FC = () => {
   const handleBookSeats = async (customer: Customer) => {
     if (!selectedShow || getTicketQuantity() === 0) return
     try {
+      if (!isShowBookableAt(selectedShow)) {
+        throw new Error('Booking is closed because this show time has passed.')
+      }
       setLoading(true)
       const { data: existingBookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(selectedShow)).in('status', ['CONFIRMED', 'HELD'])
       const activeBookings = existingBookings?.filter(isActiveBookingReservation) || []
@@ -313,7 +319,8 @@ const Booking: React.FC = () => {
         }
       }
 
-      const agent = agents.find(a => recordId(a) === selectedAgentId)
+      const linkedAgentId = selectedShow.type === 'EVENT' ? selectedShow.agent_id || '' : ''
+      const agent = agents.find(a => recordId(a) === linkedAgentId)
       const commissionAmount = agent ? (getTotalAmount() * (agent.commission_percentage || 0)) / 100 : 0
       const bookingReference = createBookingReference()
       const seatCodesToSave = selectedShow.type === 'EVENT'
@@ -327,7 +334,7 @@ const Booking: React.FC = () => {
         seat_code: JSON.stringify(seatCodesToSave),
         booked_by: customer.name,
         customer_id: recordId(customer),
-        agent_id: selectedAgentId || null,
+        agent_id: linkedAgentId || null,
         commission_amount: commissionAmount,
         payment_method: 'COUNTER',
         payment_status: 'PAID',
@@ -564,7 +571,7 @@ const Booking: React.FC = () => {
               <div className="mt-4 flex flex-wrap gap-2">
                 {getAvailableDates().map(d => (
                    <button key={d} onClick={() => setSelectedDate(d)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${selectedDate === d ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : darkMode ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'}`}>
-                     {format(new Date(d), 'MMM dd')}
+                     {formatDisplayDateValue(d)}
                    </button>
                 ))}
               </div>
@@ -590,11 +597,11 @@ const Booking: React.FC = () => {
                         <span className="rounded-full bg-amber-500 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white">Selected</span>
                       )}
                     </div>
-                    <div className="text-lg font-black leading-tight">{show.title}</div>
+                    <div className="text-lg font-black leading-tight">{toDisplayTitle(show.title)}</div>
                     <div className="mt-4 space-y-2 text-sm font-bold opacity-60">
                       <div className="flex items-center gap-2">
                         <CalendarDays className="h-4 w-4 shrink-0" />
-                        {format(new Date(show.date), 'EEE, MMM dd')}
+                        {formatDisplayDateValue(show.date)}
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4 shrink-0" />
@@ -624,8 +631,8 @@ const Booking: React.FC = () => {
               <div className={`rounded-2xl border p-4 shadow-sm transition-all sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                   <div>
-                    <h2 className="text-2xl font-black">{selectedShow.title}</h2>
-                    <p className="text-sm font-bold opacity-40 uppercase tracking-widest">{format(new Date(selectedShow.date), 'PPPP')} @ {selectedShow.time}</p>
+                    <h2 className="text-2xl font-black">{toDisplayTitle(selectedShow.title)}</h2>
+                    <p className="text-sm font-bold opacity-40 uppercase tracking-widest">{formatDisplayDateValue(selectedShow.date)} @ {selectedShow.time}</p>
                   </div>
                   {getTicketQuantity() > 0 && (
                     <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-4">
@@ -727,44 +734,12 @@ const Booking: React.FC = () => {
                </div>
 
                <div className="space-y-6">
-                 <div>
-                   {user?.role === 'agent' ? (
-                     <>
-                       <label className="mb-2 block text-[10px] font-black uppercase tracking-widest opacity-40">Agent (Optional)</label>
-                       <div className={`w-full p-4 rounded-2xl border font-bold ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                         {agents.find(a => recordId(a) === selectedAgentId)?.full_name || user.email}
-                       </div>
-                     </>
-                   ) : (
-                     <Select
-                       label="Agent (Optional)"
-                       value={selectedAgentId || '__none__'}
-                       onChange={(value) => setSelectedAgentId(value === '__none__' ? '' : value)}
-                       options={[
-                         { value: '__none__', label: 'No Agent' },
-                         ...agents.map(agent => ({
-                           value: recordId(agent),
-                           label: `${agent.full_name} (${agent.commission_percentage || 0}%)`,
-                         })),
-                       ]}
-                       searchable={agents.length > 3}
-                       triggerClassName="rounded-2xl px-4 py-4 font-bold"
-                     />
-                   )}
-                 </div>
-
                  <div className={`p-6 rounded-3xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                    <div className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4">Summary</div>
                    <div className="space-y-2">
-                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Show:</span><span className="text-right">{selectedShow?.title}</span></div>
+                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Show:</span><span className="text-right">{toDisplayTitle(selectedShow?.title)}</span></div>
                      <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Tickets:</span><span>{getTicketQuantity()}</span></div>
                      <div className="flex justify-between font-bold"><span>Total:</span><span>₹{getTotalAmount()}</span></div>
-                     {selectedAgentId && (
-                       <div className="flex justify-between text-xs font-bold text-amber-600">
-                         <span>Agent Comm.:</span>
-                         <span>₹{(getTotalAmount() * (agents.find(a => recordId(a) === selectedAgentId)?.commission_percentage || 0) / 100).toFixed(2)}</span>
-                       </div>
-                     )}
                    </div>
                  </div>
 

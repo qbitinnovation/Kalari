@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { db } from '@/lib/database'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDarkMode } from '@/hooks/useDarkMode'
-import { Button } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, SearchInput } from '@/components/ui'
 import {
   Plus,
   Trash2,
@@ -13,7 +13,6 @@ import {
   Pencil,
   ShieldCheck,
   ShieldAlert,
-  Search,
   Percent,
   Mail,
   X,
@@ -21,6 +20,8 @@ import {
   Eye
 } from 'lucide-react'
 import Link from 'next/link'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
+import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
 
 interface Agent {
   id: string
@@ -150,15 +151,18 @@ const AgentsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Agents Management</h1>
           <p className="text-sm opacity-60">Control booking permissions and commission rates</p>
         </div>
-        <Button onClick={() => setShowAddForm(true)}>
-          <Plus className="h-5 w-5" />
-          Add Agent
-        </Button>
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
+          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Filter agents by name or email..." containerClassName="w-full sm:w-80" />
+          <Button onClick={() => setShowAddForm(true)}>
+            <Plus className="h-5 w-5" />
+            Add Agent
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -247,23 +251,10 @@ const AgentsPage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <div className={`rounded-3xl border overflow-hidden ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
-        <div className="p-6 border-b dark:border-gray-800 flex justify-between items-center">
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 opacity-30" />
-            <input 
-              type="text" 
-              placeholder="Filter agents by name or email..." 
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 rounded-xl border dark:bg-gray-800 dark:border-gray-700 font-bold text-sm outline-none focus:ring-2 focus:ring-amber-500"
-            />
-          </div>
-        </div>
-
+      <AdminTablePanel>
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
+          <AdminTable>
+            <AdminTableHead>
               <tr className={darkMode ? 'bg-gray-800/50' : 'bg-gray-50'}>
                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest opacity-40">Agent</th>
                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest opacity-40">Commission</th>
@@ -271,17 +262,17 @@ const AgentsPage: React.FC = () => {
                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest opacity-40">Registered</th>
                 <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest opacity-40 text-right">Actions</th>
               </tr>
-            </thead>
-            <tbody className="divide-y dark:divide-gray-800">
+            </AdminTableHead>
+            <AdminTableBody>
               {filteredAgents.map(agent => (
                 <tr key={agent.id || (agent as any)._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-10 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-xl flex items-center justify-center font-black text-sm">
-                        {agent.full_name?.charAt(0) || <User className="h-5 w-5" />}
+                        {agent.full_name ? toDisplayInitial(agent.full_name) : <User className="h-5 w-5" />}
                       </div>
                       <div>
-                        <div className="font-bold">{agent.full_name || 'Unnamed Agent'}</div>
+                        <div className="font-bold">{toDisplayTitle(agent.full_name, 'Unnamed Agent')}</div>
                         <div className="text-xs opacity-50 flex items-center gap-1 mt-0.5"><Mail className="h-3 w-3" /> {agent.email}</div>
                       </div>
                     </div>
@@ -301,7 +292,7 @@ const AgentsPage: React.FC = () => {
                     </button>
                   </td>
                   <td className="px-6 py-4 text-xs font-bold opacity-40">
-                    {new Date(agent.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                    {formatDisplayDateValue(agent.created_at)}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
@@ -331,11 +322,11 @@ const AgentsPage: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {filteredAgents.length === 0 && <tr><td colSpan={5} className="py-20 text-center opacity-40 font-bold">No agents found.</td></tr>}
-            </tbody>
-          </table>
+              {filteredAgents.length === 0 && <AdminTableEmpty colSpan={5}>No agents found.</AdminTableEmpty>}
+            </AdminTableBody>
+          </AdminTable>
         </div>
-      </div>
+      </AdminTablePanel>
 
       {/* Delete Dialog */}
       <AnimatePresence>

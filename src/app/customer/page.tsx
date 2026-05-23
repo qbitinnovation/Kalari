@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { ArrowRight, CalendarDays, LogOut, Ticket, UserRound } from "lucide-react";
 import { db, Booking } from "@/lib/database";
 import { getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
+import { formatDisplayDateValue, formatDisplayTimeValue } from "@/components/ui/date-utils";
 
 type CustomerSession = {
   id: string;
@@ -160,8 +161,8 @@ const BookingSection = ({ title, bookings, emptyText }: { title: string; booking
                   <h3 className="text-xl font-black">{booking.show?.title || "Booking"}</h3>
                   <p className="mt-2 inline-flex items-center gap-2 text-sm font-bold text-stone-500">
                     <CalendarDays className="h-4 w-4" />
-                    {booking.show?.date ? format(new Date(booking.show.date), "EEE, MMM dd") : "Date unavailable"}
-                    {booking.show?.time ? ` at ${format(new Date(`2000-01-01T${booking.show.time}`), "h:mm a")}` : ""}
+                    {formatDisplayDateValue(booking.show?.date, "Date unavailable")}
+                    {booking.show?.time ? ` at ${formatDisplayTimeValue(booking.show.time)}` : ""}
                   </p>
                 </div>
                 <ArrowRight className="mt-2 h-5 w-5 text-stone-300 transition group-hover:text-amber-600" />

@@ -9,6 +9,7 @@ import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { getBookingReference, getRecordId } from '@/lib/booking'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
 import {
   ArrowLeftIcon,
   UserIcon,
@@ -162,7 +163,7 @@ const CustomerDetail: React.FC = () => {
                 {customer.name}
               </h2>
               <p className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                Customer since {format(new Date(customer.created_at), 'MMM yyyy')}
+                Customer since {formatDisplayDateValue(customer.created_at)}
               </p>
             </div>
 
@@ -319,7 +320,7 @@ const CustomerDetail: React.FC = () => {
                             <div className="flex items-center">
                               <CalendarIcon className={`h-4 w-4 mr-2 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
                               <span className={`${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {booking.show?.date ? format(new Date(booking.show.date), 'MMM dd, yyyy') : 'Unknown Date'}
+                                {formatDisplayDateValue(booking.show?.date, 'Unknown Date')}
                               </span>
                             </div>
                             <div className="flex items-center">
@@ -337,7 +338,7 @@ const CustomerDetail: React.FC = () => {
                           </div>
                           
                           <div className={`mt-2 text-xs ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                            Booked on {format(new Date(booking.booking_time), 'MMM dd, yyyy \'at\' h:mm a')}
+                            Booked on {formatDisplayDateValue(booking.booking_time)} at {format(new Date(booking.booking_time), 'h:mm a')}
                           </div>
                         </div>
                       </div>

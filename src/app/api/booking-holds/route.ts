@@ -10,6 +10,7 @@ import {
   createTicketCodes,
   getRecordId,
   isActiveBookingReservation,
+  isShowBookableAt,
   parseSeatCodes,
 } from "@/lib/booking";
 import { createNotification } from "@/lib/notificationStore";
@@ -106,7 +107,7 @@ const ensureLocalCustomer = (store: any, form: any) => {
   return customer;
 };
 
-const buildHold = ({ show, seatCodes, customer, form }: { show: any; seatCodes: string[]; customer: any; form: any }) => {
+const buildHold = ({ show, seatCodes, customer, form, commissionAmount = 0 }: { show: any; seatCodes: string[]; customer: any; form: any; commissionAmount?: number }) => {
   const now = nowIso();
   return {
     booking_reference: createBookingReference(new Date(now)),
@@ -117,6 +118,8 @@ const buildHold = ({ show, seatCodes, customer, form }: { show: any; seatCodes: 
     payment_method: "RAZORPAY",
     payment_status: "PAYMENT_PENDING",
     total_amount: Number(show.price || 0) * seatCodes.length,
+    agent_id: show.type === "EVENT" ? show.agent_id || null : null,
+    commission_amount: commissionAmount,
     booking_time: now,
     status: "HELD",
     hold_token: holdToken(),
@@ -164,10 +167,12 @@ export async function POST(req: NextRequest) {
     const Booking = getGenericModel("bookings") as any;
     const Customer = getGenericModel("customers") as any;
     const Layout = getGenericModel("layouts") as any;
+    const User = getGenericModel("users") as any;
     await expireMongoHolds(Booking);
 
     const show = await findDocument(Show, showId);
     if (!show || show.status !== "ACTIVE") return NextResponse.json({ error: "This show is not open for booking." }, { status: 400 });
+    if (!isShowBookableAt(show)) return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
 
     const seatCodes = show.type === "EVENT"
       ? Array.from({ length: ticketCount }).map(() => "GENERAL")
@@ -180,7 +185,11 @@ export async function POST(req: NextRequest) {
     if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
     const customer = await ensureMongoCustomer(Customer, form);
-    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form }));
+    const linkedAgent = show.type === "EVENT" && show.agent_id ? await findDocument(User, String(show.agent_id)) : null;
+    const commissionAmount = linkedAgent
+      ? (Number(show.price || 0) * seatCodes.length * Number(linkedAgent.commission_percentage || 0)) / 100
+      : 0;
+    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form, commissionAmount }));
     return NextResponse.json({ data: holdPayload(booking) }, { status: 201 });
   } catch (error: any) {
     const showId = String(body?.showId || "");
@@ -194,6 +203,7 @@ export async function POST(req: NextRequest) {
       expireLocalHolds(store);
       const show = (store.shows || []).find((row: any) => recordId(row) === showId);
       if (!show || show.status !== "ACTIVE") return NextResponse.json({ error: "This show is not open for booking." }, { status: 400 });
+      if (!isShowBookableAt(show)) return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
       const seatCodes = show.type === "EVENT"
         ? Array.from({ length: ticketCount }).map(() => "GENERAL")
         : requestedSeats;
@@ -207,9 +217,15 @@ export async function POST(req: NextRequest) {
       );
       if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
       const customer = ensureLocalCustomer(store, form);
+      const linkedAgent = show.type === "EVENT" && show.agent_id
+        ? (store.users || []).find((user: any) => recordId(user) === String(show.agent_id))
+        : null;
+      const commissionAmount = linkedAgent
+        ? (Number(show.price || 0) * seatCodes.length * Number(linkedAgent.commission_percentage || 0)) / 100
+        : 0;
       const booking = {
         id: `bookings-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ...buildHold({ show, seatCodes, customer, form }),
+        ...buildHold({ show, seatCodes, customer, form, commissionAmount }),
       };
       store.bookings = store.bookings || [];
       store.bookings.push(booking);
@@ -249,6 +265,7 @@ export async function PATCH(req: NextRequest) {
 
     const show = await findDocument(Show, String(hold.show_id));
     if (!show) return NextResponse.json({ error: "Held show no longer exists." }, { status: 409 });
+    if (!isShowBookableAt(show)) return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 409 });
 
     const seatCodes = bookingSeats(hold);
     const ticketCodes = createTicketCodes(seatCodes.length);
@@ -323,6 +340,7 @@ export async function PATCH(req: NextRequest) {
       }
       const show = (store.shows || []).find((row: any) => recordId(row) === hold.show_id);
       if (!show) return NextResponse.json({ error: "Held show no longer exists." }, { status: 409 });
+      if (!isShowBookableAt(show)) return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 409 });
       const seatCodes = bookingSeats(hold);
       const ticketCodes = createTicketCodes(seatCodes.length);
       store.bookings[holdIndex] = {

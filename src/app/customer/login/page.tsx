@@ -58,7 +58,7 @@ export default function CustomerLoginPage() {
   };
 
   const sendOtp = async (
-    nextNotice = "OTP sent. Use the code below in development.",
+    nextNotice = "OTP sent. Use the test code shown below.",
   ) => {
     const response = await fetch("/api/customer/request-otp", {
       method: "POST",
@@ -298,7 +298,7 @@ export default function CustomerLoginPage() {
           )}
           {debugOtp && step === "otp" && (
             <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-900">
-              Development OTP: {debugOtp}
+              Test OTP: {debugOtp}
             </div>
           )}
 

@@ -8,7 +8,8 @@ import { PublicFooter } from '@/components/PublicFooter'
 import { Calendar, Clock, MapPin, IndianRupee, ArrowRight, Filter, Sparkles } from 'lucide-react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getAvailabilityLabel } from '@/lib/booking'
+import { getAvailabilityLabel, isShowBookableAt } from '@/lib/booking'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
 
 interface PublicShow {
   id: string
@@ -23,6 +24,11 @@ interface PublicShow {
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT"
   available_count?: number
   type?: 'KALARI' | 'EVENT'
+}
+
+const publicShowBookingHref = (show: PublicShow) => {
+  const showId = String(show.id || show._id || "")
+  return showId ? `/book?show=${encodeURIComponent(showId)}` : "/book"
 }
 
 const Schedule: React.FC = () => {
@@ -44,7 +50,7 @@ const Schedule: React.FC = () => {
       }
 
       const { data } = await query
-      setShows(data || [])
+      setShows((data || []).filter((show: PublicShow) => isShowBookableAt(show)))
     } catch (error) {
       console.error('Error fetching shows:', error)
     } finally {
@@ -147,7 +153,7 @@ const Schedule: React.FC = () => {
 
                       <div className="p-8 flex-1 flex flex-col">
                         <div className="flex items-center gap-4 text-xs font-black opacity-40 uppercase tracking-widest mb-4">
-                           <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {format(new Date(show.date), 'EEE, MMM dd')}</div>
+                           <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDisplayDateValue(show.date)}</div>
                            <div className="flex items-center gap-1"><Clock className="h-3 w-3" /> {show.time}</div>
                         </div>
                         
@@ -164,7 +170,7 @@ const Schedule: React.FC = () => {
                           
                           {show.status === 'ACTIVE' && show.availability_status !== 'SOLD_OUT' ? (
                             <Link 
-                              href={`/book?show=${show.id || (show as any)._id}`} 
+                              href={publicShowBookingHref(show)}
                               className="bg-stone-950 text-white px-6 py-3 rounded-2xl font-black text-sm hover:bg-amber-600 transition-all flex items-center gap-2 group/btn"
                             >
                               Book Now

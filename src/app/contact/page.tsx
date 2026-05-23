@@ -50,7 +50,7 @@ const Contact: React.FC = () => {
                   <h2 className="text-3xl font-black mb-8 tracking-tight">Visit our Kalari.</h2>
                   <div className="space-y-8">
                     {[
-                      { icon: MapPin, title: 'Our Location', detail: 'Kovalam Beach Road, Near Lighthouse, Kovalam, Kerala 695527', color: 'text-blue-600 bg-blue-100' },
+                      { icon: MapPin, title: 'Our Location', detail: 'Kovalam Beach Road, Near Lighthouse, Kovalam, Kerala 695527', color: 'text-primary-700 bg-primary-100' },
                       { icon: Phone, title: 'Call Us', detail: '+91 98765 43210', color: 'text-emerald-600 bg-emerald-100' },
                       { icon: Mail, title: 'Email Us', detail: 'hello@kalarikovalam.com', color: 'text-purple-600 bg-purple-100' },
                     ].map(item => (

@@ -16,7 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logActivity } from '@/utils/activityLogger'
-import { Button, DateRangePicker } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableHead, Button, DateRangePicker } from '@/components/ui'
 
 interface AnalyticsData {
   totalRevenue: number
@@ -732,9 +732,8 @@ const Analytics: React.FC = () => {
             {viewType.charAt(0).toUpperCase() + viewType.slice(1)} Performance
           </h3>
           
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
+            <AdminTable className="w-full">
+              <AdminTableHead>
                 <tr className={`border-b transition-colors duration-200 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                   <th className={`text-left py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                     {viewType === 'daily' ? 'Date' : viewType === 'monthly' ? 'Month' : 'Year'}
@@ -743,8 +742,8 @@ const Analytics: React.FC = () => {
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Tickets</th>
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Shows</th>
                 </tr>
-              </thead>
-              <tbody>
+              </AdminTableHead>
+              <AdminTableBody>
                 {(viewType === 'daily' ? analytics.dailyData : 
                   viewType === 'monthly' ? analytics.monthlyData : 
                   analytics.yearlyData).length === 0 ? (
@@ -773,9 +772,8 @@ const Analytics: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </AdminTableBody>
+            </AdminTable>
         </div>
 
         {/* Show Performance */}
@@ -784,16 +782,15 @@ const Analytics: React.FC = () => {
             Show Performance
           </h3>
           
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
+            <AdminTable className="w-full">
+              <AdminTableHead>
                 <tr className={`border-b transition-colors duration-200 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                   <th className={`text-left py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Show</th>
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Revenue</th>
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Occupancy</th>
                 </tr>
-              </thead>
-              <tbody>
+              </AdminTableHead>
+              <AdminTableBody>
                 {analytics.showPerformance.length === 0 ? (
                   <tr>
                     <td colSpan={3} className={`py-8 text-center text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -829,9 +826,8 @@ const Analytics: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </AdminTableBody>
+            </AdminTable>
         </div>
 
         {/* Customer Performance */}
@@ -840,17 +836,16 @@ const Analytics: React.FC = () => {
             Customer Performance
           </h3>
           
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
+            <AdminTable className="w-full">
+              <AdminTableHead>
                 <tr className={`border-b transition-colors duration-200 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                   <th className={`text-left py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Customer</th>
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Revenue</th>
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Tickets</th>
                   <th className={`text-right py-3 px-2 text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>AOV</th>
                 </tr>
-              </thead>
-              <tbody>
+              </AdminTableHead>
+              <AdminTableBody>
                 {analytics.customerPerformance.length === 0 ? (
                   <tr>
                     <td colSpan={4} className={`py-8 text-center text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -887,9 +882,8 @@ const Analytics: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </AdminTableBody>
+            </AdminTable>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import { QRCodeSVG as QRCode } from "qrcode.react";
 import { ArrowLeft, CalendarDays, Clock, Printer, Send, Ticket, X } from "lucide-react";
 import { db, Booking, Ticket as TicketType } from "@/lib/database";
 import { getBookingReference, getRecordId, isGeneralAdmissionSeatCode, parseSeatCodes } from "@/lib/booking";
+import { formatDisplayDateValue, formatDisplayTimeValue } from "@/components/ui/date-utils";
 
 type CustomerSession = {
   id: string;
@@ -139,8 +140,22 @@ export default function CustomerBookingDetailPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f3eb] pt-24 text-stone-950">
-      <div className="mx-auto max-w-5xl px-4 py-8">
+    <main className="min-h-screen bg-[#f7f3eb] pt-24 text-stone-950 print:bg-white print:pt-0">
+      <CustomerPrintTicket
+        bookingReference={bookingReference}
+        showTitle={booking.show?.title || "Booking"}
+        date={formatDisplayDateValue(booking.show?.date, "N/A")}
+        time={formatDisplayTimeValue(booking.show?.time, "N/A")}
+        guestName={customer?.name || "Guest"}
+        admissionLabel={isEventBooking ? "Admission" : "Seats"}
+        admissionValue={ticketDisplayValue || `${tickets.length} ticket(s)`}
+        quantity={`${tickets.length || seats.length || 1} ticket(s)`}
+        total={`Rs. ${Number(booking.total_amount || 0).toLocaleString()}`}
+        payment={booking.payment_status || "Recorded"}
+        qrValue={qrValue}
+      />
+
+      <div className="mx-auto max-w-5xl px-4 py-8 print:hidden">
         <Link href="/customer" className="mb-6 inline-flex items-center gap-2 text-sm font-black text-stone-600 hover:text-stone-950">
           <ArrowLeft className="h-4 w-4" />
           My Bookings
@@ -169,8 +184,8 @@ export default function CustomerBookingDetailPage() {
             <div className="grid gap-3 rounded-lg bg-stone-50 p-4 sm:grid-cols-2">
               <Info label="Booking Ref" value={bookingReference} mono />
               <Info label="Payment" value={booking.payment_status || "Recorded"} />
-              <Info label="Date" value={booking.show?.date ? format(new Date(booking.show.date), "EEE, MMM dd, yyyy") : "N/A"} icon={<CalendarDays className="h-4 w-4" />} />
-              <Info label="Time" value={booking.show?.time ? format(new Date(`2000-01-01T${booking.show.time}`), "h:mm a") : "N/A"} icon={<Clock className="h-4 w-4" />} />
+              <Info label="Date" value={formatDisplayDateValue(booking.show?.date, "N/A")} icon={<CalendarDays className="h-4 w-4" />} />
+              <Info label="Time" value={formatDisplayTimeValue(booking.show?.time, "N/A")} icon={<Clock className="h-4 w-4" />} />
               <div className="sm:col-span-2">
                 <Info label={isEventBooking ? "Admission" : "Seats"} value={ticketDisplayValue || `${tickets.length} ticket(s)`} />
               </div>
@@ -240,6 +255,68 @@ export default function CustomerBookingDetailPage() {
     </main>
   );
 }
+
+const CustomerPrintTicket = ({
+  bookingReference,
+  showTitle,
+  date,
+  time,
+  guestName,
+  admissionLabel,
+  admissionValue,
+  quantity,
+  total,
+  payment,
+  qrValue,
+}: {
+  bookingReference: string;
+  showTitle: string;
+  date: string;
+  time: string;
+  guestName: string;
+  admissionLabel: string;
+  admissionValue: string;
+  quantity: string;
+  total: string;
+  payment: string;
+  qrValue: string;
+}) => (
+  <section className="hidden print:block">
+    <div className="mx-auto w-[180mm] rounded-lg border border-stone-300 p-8 text-stone-950">
+      <div className="flex items-start justify-between gap-8 border-b border-stone-200 pb-5">
+        <div className="flex items-start gap-4">
+          <img src="/logo.png" alt="Kovalam Kalari" className="h-16 w-16 rounded object-contain" />
+          <div>
+            <div className="text-sm font-black uppercase tracking-[0.25em] text-amber-700">Kovalam Kalari</div>
+            <h1 className="mt-3 text-3xl font-black leading-tight">{showTitle}</h1>
+            <p className="mt-2 font-mono text-sm font-black text-stone-500">{bookingReference}</p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-stone-200 p-3">
+          <QRCode value={qrValue} size={118} />
+        </div>
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-x-10 gap-y-5 text-sm">
+        <PrintField label="Guest" value={guestName} />
+        <PrintField label="Payment" value={payment} />
+        <PrintField label="Date" value={date} />
+        <PrintField label="Time" value={time} />
+        <PrintField label={admissionLabel} value={admissionValue} />
+        <PrintField label="Quantity" value={quantity} />
+        <PrintField label="Total" value={total} />
+        <PrintField label="QR Value" value={qrValue} mono />
+      </div>
+    </div>
+  </section>
+);
+
+const PrintField = ({ label, value, mono }: { label: string; value: string; mono?: boolean }) => (
+  <div>
+    <div className="text-[10px] font-black uppercase tracking-[0.2em] text-stone-400">{label}</div>
+    <div className={`mt-1 text-base font-black ${mono ? "font-mono" : ""}`}>{value}</div>
+  </div>
+);
 
 const Info = ({ label, value, mono, icon }: { label: string; value: string; mono?: boolean; icon?: React.ReactNode }) => (
   <div>

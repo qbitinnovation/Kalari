@@ -7,6 +7,9 @@ import { useDarkMode } from '@/hooks/useDarkMode'
 import { Button } from '@/components/ui'
 import { getDefaultArenaStructure, getSymmetricArenaSections } from '@/lib/arenaLayout'
 
+const layoutRecordId = (layout: Layout) =>
+  String(layout.id || (layout as Layout & { _id?: string })._id || '')
+
 const Layouts: React.FC = () => {
   const [layouts, setLayouts] = useState<Layout[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,7 +57,7 @@ const Layouts: React.FC = () => {
         const { error } = await db
           .from('layouts')
           .update(layoutData)
-          .eq('id', editingLayout.id)
+          .eq('id', layoutRecordId(editingLayout))
         
         if (error) throw error
       } else {
@@ -206,7 +209,7 @@ const Layouts: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {layouts.map((layout) => (
-          <div key={layout.id} className={`rounded-2xl shadow-sm border p-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+          <div key={layoutRecordId(layout)} className={`rounded-2xl shadow-sm border p-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
             <div className="flex justify-between items-start mb-4">
               <h3 className={`text-lg font-semibold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>{layout.name}</h3>
               <div className="flex space-x-2">
@@ -217,7 +220,7 @@ const Layouts: React.FC = () => {
                   <PencilIcon className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={() => handleDelete(layout.id)}
+                  onClick={() => handleDelete(layoutRecordId(layout))}
                   className="text-red-600 hover:text-red-900"
                 >
                   <TrashIcon className="h-5 w-5" />

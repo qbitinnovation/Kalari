@@ -6,6 +6,19 @@ import { db, Booking, Show, Customer } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
+import { getBookingReference, getRecordId } from '@/lib/booking'
+import { escapeReportHtml, openAdminReportPdf } from '@/lib/adminReportTemplate'
+import {
+  AdminTable,
+  AdminTableBody,
+  AdminTableCell,
+  AdminTableEmpty,
+  AdminTableHead,
+  AdminTableHeaderCell,
+  AdminTablePanel,
+  AdminTableRow,
+} from '@/components/ui'
 import { 
   ArrowLeft, 
   TrendingUp, 
@@ -112,6 +125,73 @@ const AgentDetailPage: React.FC = () => {
     if (!booking.show_details) return 0
     return booking.show_details.price * getSeatCount(booking.seat_code)
   }
+  const displayedAgentId = getRecordId(agent)
+  const rupees = (amount: number) => `Rs. ${Number(amount || 0).toLocaleString('en-IN')}`
+  const exportAgentReport = () => {
+    if (!agent) return
+
+    const bookingRows = bookings.map((booking) => `
+      <tr>
+        <td>
+          <strong>${escapeReportHtml(getBookingReference(booking))}</strong>
+          <span class="muted">${escapeReportHtml(formatDisplayDateValue(booking.booking_time))}</span>
+        </td>
+        <td>
+          <strong>${escapeReportHtml(booking.show_details?.title || 'Unknown Show')}</strong>
+          <span class="muted">${escapeReportHtml(booking.show_details?.type || 'Show')}</span>
+        </td>
+        <td>${escapeReportHtml(booking.booked_by || booking.customer?.name || 'Customer')}</td>
+        <td class="nowrap">${escapeReportHtml(getSeatCount(booking.seat_code))}</td>
+        <td class="nowrap">${escapeReportHtml(rupees(calculateTotalPrice(booking)))}</td>
+        <td class="nowrap">${escapeReportHtml(rupees(booking.commission_amount || 0))}</td>
+        <td>${escapeReportHtml(booking.status || 'CONFIRMED')}</td>
+      </tr>
+    `).join('')
+
+    openAdminReportPdf({
+      title: 'Agent Performance Report',
+      subtitle: `Booking and commission summary for ${agent.full_name}.`,
+      generatedLabel: `Generated ${formatDisplayDateValue(new Date())}`,
+      body: `
+        <section class="metrics">
+          <article class="metric"><p class="label">Total Bookings</p><p class="value">${escapeReportHtml(totalBookings)}</p></article>
+          <article class="metric"><p class="label">Total Commission</p><p class="value">${escapeReportHtml(rupees(totalCommission))}</p></article>
+          <article class="metric"><p class="label">Commission Rate</p><p class="value">${escapeReportHtml(`${agent.commission_percentage || 0}%`)}</p></article>
+          <article class="metric"><p class="label">Agent Status</p><p class="value">${escapeReportHtml(agent.active ? 'Active' : 'Inactive')}</p></article>
+        </section>
+        <section class="panels">
+          <article class="panel">
+            <h2>Agent Details</h2>
+            <div class="detail-grid">
+              <div class="detail"><p class="label">Agent Name</p><p class="value">${escapeReportHtml(agent.full_name)}</p></div>
+              <div class="detail"><p class="label">Agent ID</p><p class="value">${escapeReportHtml(displayedAgentId)}</p></div>
+              <div class="detail"><p class="label">Email</p><p class="value">${escapeReportHtml(agent.email)}</p></div>
+              <div class="detail"><p class="label">Joined Date</p><p class="value">${escapeReportHtml(formatDisplayDateValue(agent.created_at))}</p></div>
+            </div>
+          </article>
+          <article class="panel">
+            <h2>Bookings History</h2>
+            ${bookings.length ? `
+              <table>
+                <thead>
+                  <tr>
+                    <th>Booking Ref</th>
+                    <th>Show / Event</th>
+                    <th>Customer</th>
+                    <th>Tickets</th>
+                    <th>Amount</th>
+                    <th>Commission</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>${bookingRows}</tbody>
+              </table>
+            ` : '<div class="empty">No bookings found for this agent.</div>'}
+          </article>
+        </section>
+      `,
+    })
+  }
 
   if (loading) return <div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600"></div></div>
 
@@ -144,13 +224,13 @@ const AgentDetailPage: React.FC = () => {
               <h1 className="text-3xl font-black tracking-tight">{agent.full_name}</h1>
               <p className="opacity-50 font-bold text-xs uppercase tracking-widest flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${agent.active ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                {agent.active ? 'Active Agent' : 'Inactive Agent'} • Agent ID: {agent.id.slice(0, 8)}
+                {agent.active ? 'Active Agent' : 'Inactive Agent'} • Agent ID: {displayedAgentId.slice(0, 8)}
               </p>
             </div>
           </div>
           <div className="flex gap-2 w-full md:w-auto">
-            <button className={`flex-1 md:flex-none px-6 py-3 rounded-2xl border font-bold text-sm transition-all flex items-center justify-center gap-2 ${darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
-              <Download className="w-4 h-4" /> Export Report
+            <button onClick={exportAgentReport} className={`flex-1 md:flex-none px-6 py-3 rounded-2xl border font-bold text-sm transition-all flex items-center justify-center gap-2 ${darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+              <Download className="w-4 h-4" /> Export PDF
             </button>
           </div>
         </header>
@@ -177,85 +257,76 @@ const AgentDetailPage: React.FC = () => {
           />
           <StatCard 
             label="Joined Date" 
-            value={format(new Date(agent.created_at), 'MMM dd, yyyy')} 
+            value={formatDisplayDateValue(agent.created_at)} 
             icon={<User className="w-6 h-6 text-purple-500" />} 
             darkMode={darkMode}
           />
         </div>
 
-        {/* Bookings Table */}
-        <div className={`rounded-[2.5rem] border overflow-hidden ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xl shadow-slate-100'}`}>
-          <div className="p-8 border-b dark:border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <h2 className="text-xl font-black">Agent Bookings History</h2>
-            <div className="flex gap-2 w-full sm:w-auto">
-              <div className={`flex-1 sm:flex-none flex items-center gap-2 px-4 py-2 rounded-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <Filter className="w-4 h-4 opacity-40" />
-                <span className="text-xs font-bold opacity-60">Sort: Newest</span>
-              </div>
+        <AdminTablePanel
+          title="Agent Bookings History"
+          actions={
+            <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <Filter className="h-4 w-4" />
+              Sort: Newest
             </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className={darkMode ? 'bg-slate-800/30' : 'bg-slate-50/50'}>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest opacity-40">Date & Show</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest opacity-40">Customer</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest opacity-40">Seats</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest opacity-40">Booking Amount</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest opacity-40">Commission</th>
-                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest opacity-40 text-right">Action</th>
+          }
+        >
+            <AdminTable>
+              <AdminTableHead>
+                <tr>
+                  <AdminTableHeaderCell>Date & Show</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Customer</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Seats</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Booking Amount</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Commission</AdminTableHeaderCell>
+                  <AdminTableHeaderCell align="right">Action</AdminTableHeaderCell>
                 </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-slate-800">
+              </AdminTableHead>
+              <AdminTableBody>
                 {bookings.map((booking) => (
-                  <tr key={booking.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-all">
-                    <td className="px-8 py-6">
+                  <AdminTableRow key={getRecordId(booking)} className="group">
+                    <AdminTableCell>
                       <div className="font-bold text-sm leading-tight mb-1">{booking.show_details?.title || 'Unknown Show'}</div>
                       <div className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
-                        {format(new Date(booking.booking_time), 'MMM dd, yyyy • hh:mm a')}
+                        {formatDisplayDateValue(booking.booking_time)} - {format(new Date(booking.booking_time), 'hh:mm a')}
                       </div>
-                    </td>
-                    <td className="px-8 py-6">
+                    </AdminTableCell>
+                    <AdminTableCell>
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] font-black">
                           {booking.booked_by.charAt(0)}
                         </div>
                         <div className="font-bold text-sm">{booking.booked_by}</div>
                       </div>
-                    </td>
-                    <td className="px-8 py-6">
+                    </AdminTableCell>
+                    <AdminTableCell>
                       <span className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black">
                         {getSeatCount(booking.seat_code)} SEATS
                       </span>
-                    </td>
-                    <td className="px-8 py-6">
+                    </AdminTableCell>
+                    <AdminTableCell>
                       <div className="font-bold text-sm text-slate-500">₹{calculateTotalPrice(booking).toLocaleString()}</div>
-                    </td>
-                    <td className="px-8 py-6">
+                    </AdminTableCell>
+                    <AdminTableCell>
                       <div className="font-black text-sm text-emerald-500">₹{booking.commission_amount?.toLocaleString() || 0}</div>
-                    </td>
-                    <td className="px-8 py-6 text-right">
+                    </AdminTableCell>
+                    <AdminTableCell align="right">
                       <button 
-                        onClick={() => router.push(`/admin/tickets?booking=${booking.id}`)}
+                        onClick={() => router.push(`/admin/tickets?booking=${getRecordId(booking)}`)}
                         className="p-2 rounded-lg opacity-20 group-hover:opacity-100 hover:bg-amber-100 hover:text-amber-600 transition-all"
                       >
                         <ChevronRight className="w-5 h-5" />
                       </button>
-                    </td>
-                  </tr>
+                    </AdminTableCell>
+                  </AdminTableRow>
                 ))}
                 {bookings.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-24 text-center opacity-30 font-black uppercase tracking-widest">
-                      No bookings found for this agent
-                    </td>
-                  </tr>
+                  <AdminTableEmpty colSpan={6}>No bookings found for this agent.</AdminTableEmpty>
                 )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </AdminTableBody>
+            </AdminTable>
+        </AdminTablePanel>
       </div>
     </div>
   )

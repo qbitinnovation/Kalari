@@ -6,6 +6,7 @@ import { db } from "@/lib/database";
 import { activityImages } from "@/lib/seedData";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { Button, Input, Select, Textarea } from "@/components/ui";
+import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = {
   id: string;
@@ -120,7 +121,7 @@ export default function AdminActivitiesPage() {
   };
 
   const deleteActivity = async (activity: Activity) => {
-    if (!window.confirm(`Delete ${activity.title}?`)) return;
+    if (!window.confirm(`Delete ${toDisplayTitle(activity.title)}?`)) return;
     await db.from("activities").delete().eq("id", recordId(activity));
     await fetchActivities();
   };
@@ -146,14 +147,14 @@ export default function AdminActivitiesPage() {
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {activities.map((activity) => (
             <article key={recordId(activity)} className={`overflow-hidden rounded-2xl border shadow-sm ${darkMode ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"}`}>
-              <img src={activity.image} alt={activity.title} className="h-48 w-full object-cover" />
+              <img src={activity.image} alt={toDisplayTitle(activity.title)} className="h-48 w-full object-cover" />
               <div className="p-5">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase tracking-widest text-blue-700">{activity.category}</span>
-                  <span className={`rounded-full px-3 py-1 text-xs font-black ${activity.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{activity.status}</span>
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase tracking-widest text-blue-700">{toDisplayTitle(activity.category)}</span>
+                  <span className={`rounded-full px-3 py-1 text-xs font-black ${activity.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{toDisplayTitle(activity.status)}</span>
                 </div>
-                <h2 className="mt-3 text-xl font-black">{activity.title}</h2>
-                <p className="mt-2 line-clamp-2 text-sm opacity-70">{activity.description}</p>
+                <h2 className="mt-3 text-xl font-black">{toDisplayTitle(activity.title)}</h2>
+                <p className="mt-2 line-clamp-2 text-sm opacity-70">{toDisplayTitle(activity.description)}</p>
                 <div className="mt-4 grid gap-2 text-sm font-semibold opacity-80">
                   <span className="inline-flex items-center gap-2"><MapPin className="h-4 w-4" /> {activity.location}</span>
                   <span className="inline-flex items-center gap-2"><Clock className="h-4 w-4" /> {activity.duration}</span>

@@ -4,7 +4,6 @@ import { readStore, writeStore } from "@/lib/localStore";
 
 const normalizePhone = (phone: string) => phone.replace(/[^\d+]/g, "").trim();
 const createOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
-const shouldExposeOtp = () => process.env.NODE_ENV !== "production";
 
 export async function POST(req: NextRequest) {
   let body: any = null;
@@ -32,7 +31,7 @@ export async function POST(req: NextRequest) {
       data: {
         success: true,
         expires_at: expiresAt,
-        debug_otp: shouldExposeOtp() ? code : undefined,
+        debug_otp: code,
       },
     });
   } catch {
@@ -63,7 +62,7 @@ export async function POST(req: NextRequest) {
       data: {
         success: true,
         expires_at: expiresAt,
-        debug_otp: shouldExposeOtp() ? code : undefined,
+        debug_otp: code,
       },
       fallback: true,
     });

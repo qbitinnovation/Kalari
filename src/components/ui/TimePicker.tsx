@@ -2,11 +2,10 @@
 
 import React, { useMemo, useState } from 'react'
 import * as Popover from '@radix-ui/react-popover'
-import { format, parse } from 'date-fns'
 import { Clock } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Field, type FieldProps } from './Field'
-import { buildTimeSlots, parseTimeValue } from './date-utils'
+import { buildTimeSlots, formatDisplayTimeValue } from './date-utils'
 import { popoverContentClass, triggerClass, type FieldVariant } from './field-styles'
 
 export interface TimePickerProps extends Omit<FieldProps, 'children'> {
@@ -19,13 +18,6 @@ export interface TimePickerProps extends Omit<FieldProps, 'children'> {
   endHour?: number
   triggerClassName?: string
   variant?: FieldVariant
-}
-
-function formatDisplayTime(value: string): string {
-  const parsed = parseTimeValue(value)
-  if (!parsed) return ''
-  const date = parse(`${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}`, 'HH:mm', new Date())
-  return format(date, 'h:mm a')
 }
 
 export function TimePicker({
@@ -43,7 +35,7 @@ export function TimePicker({
 }: TimePickerProps) {
   const [open, setOpen] = useState(false)
   const slots = useMemo(() => buildTimeSlots(minuteStep, startHour, endHour), [minuteStep, startHour, endHour])
-  const display = value ? formatDisplayTime(value) : placeholder
+  const display = value ? formatDisplayTimeValue(value, '') : placeholder
 
   return (
     <Field {...fieldProps} variant={variant} className={className}>
@@ -85,7 +77,7 @@ export function TimePicker({
                           : 'text-slate-700 hover:bg-primary-50 dark:text-slate-200 dark:hover:bg-primary-900/30'
                       )}
                     >
-                      {formatDisplayTime(slot)}
+                      {formatDisplayTimeValue(slot, '')}
                     </button>
                   )
                 })}

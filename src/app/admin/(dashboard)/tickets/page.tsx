@@ -5,7 +5,6 @@ import { db, Ticket } from '@/lib/database'
 import { format } from 'date-fns'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { 
-  MagnifyingGlassIcon, 
   PrinterIcon, 
   XMarkIcon,
   EyeIcon
@@ -13,8 +12,9 @@ import {
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
 import { getBookingReference, isGeneralAdmissionSeatCode } from '@/lib/booking'
-import { Button } from '@/components/ui'
-import { DatePicker } from '@/components/ui'
+import { toDisplayTitle } from '@/lib/textFormat'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, DatePicker, SearchInput } from '@/components/ui'
+import { formatDisplayDateValue, formatDisplayTimeValue } from '@/components/ui/date-utils'
 
 interface TicketWithDetails extends Ticket {
   show?: {
@@ -359,11 +359,11 @@ const Tickets: React.FC = () => {
               <div class="info-section">
                 <div class="info-row">
                   <span class="info-label">Date:</span>
-                  <span class="info-value">${booking.show?.date ? format(new Date(booking.show.date), 'MMM dd, yyyy') : 'N/A'}</span>
+                  <span class="info-value">${formatDisplayDateValue(booking.show?.date, 'N/A')}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">Time:</span>
-                  <span class="info-value">${booking.show?.time ? format(new Date(`2000-01-01T${booking.show.time}`), 'h:mm a') : 'N/A'}</span>
+                  <span class="info-value">${formatDisplayTimeValue(booking.show?.time, 'N/A')}</span>
                 </div>
                 <div class="seats-section">
                   <div class="seats-label">${getTicketDisplayLabel(booking)}:</div>
@@ -391,7 +391,7 @@ const Tickets: React.FC = () => {
 
               <div class="footer">
                 <div>Booking Ref: ${booking.booking_reference}</div>
-                <div>Generated: ${format(new Date(booking.generated_at), 'MMM dd, yyyy h:mm a')}</div>
+                <div>Generated: ${formatDisplayDateValue(booking.generated_at)} ${format(new Date(booking.generated_at), 'h:mm a')}</div>
               </div>
             </div>
           </div>
@@ -421,7 +421,7 @@ const Tickets: React.FC = () => {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-8">
+      <div className="mb-8 flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
         <div>
           <h1 className={`text-2xl sm:text-3xl font-semibold transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
             Ticket History
@@ -430,10 +430,42 @@ const Tickets: React.FC = () => {
             View, print, and manage all generated tickets
           </p>
         </div>
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end 2xl:w-auto 2xl:flex-nowrap">
+          <SearchInput
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search tickets, seats, shows..."
+            containerClassName="w-full sm:w-72"
+          />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end">
+            <DatePicker
+              label="Generated Date"
+              value={selectedDate}
+              onChange={setSelectedDate}
+              placeholder="All dates"
+              presets={[
+                { label: 'Clear Filter', value: 'clear' },
+                { label: 'Today', value: 'today' },
+              ]}
+              className="w-full sm:w-44"
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className={`min-h-11 w-full rounded-xl border px-3 py-2.5 text-sm font-medium outline-none focus:ring-[3px] focus:ring-primary-500/20 sm:w-40 ${darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="revoked">Revoked</option>
+              <option value="cancellation-pending">Cancellation Requests</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Date Filter */}
-      <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+      <div className="hidden">
         <h2 className={`text-lg font-medium mb-4 transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>Filter by Generated Date</h2>
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
           <DatePicker
@@ -453,7 +485,7 @@ const Tickets: React.FC = () => {
         <div className="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
             {selectedDate ? (
-              <>Showing {bookings.length} booking(s) generated on {format(new Date(selectedDate), 'MMM dd, yyyy')}</>
+              <>Showing {bookings.length} booking(s) generated on {formatDisplayDateValue(selectedDate)}</>
             ) : (
               <>Showing {bookings.length} booking(s) (all dates)</>
             )}
@@ -462,18 +494,17 @@ const Tickets: React.FC = () => {
             <div className={`text-xs px-2 py-1 rounded-full transition-colors duration-200 ${
               darkMode ? 'bg-primary-900/50 text-primary-300' : 'bg-primary-100 text-primary-700'
             }`}>
-              Filtered by: {format(new Date(selectedDate), 'MMM dd, yyyy')}
+              Filtered by: {formatDisplayDateValue(selectedDate)}
             </div>
           )}
         </div>
       </div>
 
       {/* Search and Status Filters */}
-      <div className={`rounded-2xl shadow-sm border p-4 sm:p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+      <div className="hidden">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1">
             <div className="relative">
-              <MagnifyingGlassIcon className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
               <input
                 type="text"
                 placeholder="Search by ticket code, seat, show, or customer..."
@@ -500,11 +531,9 @@ const Tickets: React.FC = () => {
       </div>
 
       {/* Bookings Table */}
-      <div className={`rounded-2xl shadow-sm border overflow-hidden transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
-        <div className="overflow-x-auto -mx-3 sm:mx-0">
-          <div className="px-3 sm:px-0">
-            <table className={`min-w-full divide-y transition-colors duration-200 ${darkMode ? 'divide-slate-800' : 'divide-slate-200'}`}>
-              <thead className={`transition-colors duration-200 ${darkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+      <AdminTablePanel>
+            <AdminTable>
+              <AdminTableHead>
                 <tr>
                   <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Booking Ref
@@ -534,8 +563,15 @@ const Tickets: React.FC = () => {
                     Actions
                   </th>
                 </tr>
-              </thead>
-              <tbody className={`divide-y transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 divide-slate-800' : 'bg-white divide-slate-200'}`}>
+              </AdminTableHead>
+              <AdminTableBody>
+                {filteredBookings.length === 0 && (
+                  <AdminTableEmpty colSpan={9}>
+                    {searchTerm || statusFilter !== 'all' || selectedDate
+                      ? 'No ticket history matches the current filters.'
+                      : 'No ticket history to display.'}
+                  </AdminTableEmpty>
+                )}
                 {filteredBookings.map((booking) => (
                   <tr key={booking.booking_id} className={`transition-colors duration-200 ${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}`}>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -549,12 +585,12 @@ const Tickets: React.FC = () => {
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>{booking.show?.title}</div>
+                      <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>{toDisplayTitle(booking.show?.title)}</div>
                       <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {booking.show?.date ? format(new Date(booking.show.date), 'MMM dd, yyyy') : 'N/A'}
+                        {formatDisplayDateValue(booking.show?.date, 'N/A')}
                       </div>
                       <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {booking.show?.time ? format(new Date(`2000-01-01T${booking.show.time}`), 'h:mm a') : 'N/A'}
+                        {formatDisplayTimeValue(booking.show?.time, 'N/A')}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -567,7 +603,7 @@ const Tickets: React.FC = () => {
                           </div>
                           <div>
                             <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                              {booking.customer.name}
+                              {toDisplayTitle(booking.customer.name)}
                             </div>
                             {booking.customer.email && (
                               <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -623,13 +659,13 @@ const Tickets: React.FC = () => {
                                 ? 'bg-red-900/20 text-red-400 border border-red-800'
                                 : 'bg-red-100 text-red-800'
                         }`}>
-                          {booking.status}
+                          {toDisplayTitle(booking.status)}
                         </span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {format(new Date(booking.generated_at), 'MMM dd, yyyy')}
+                        {formatDisplayDateValue(booking.generated_at)}
                       </div>
                       <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {format(new Date(booking.generated_at), 'h:mm a')}
@@ -661,11 +697,9 @@ const Tickets: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+              </AdminTableBody>
+            </AdminTable>
+      </AdminTablePanel>
 
       {/* Preview Modal */}
       {showPreview && selectedBooking && (
@@ -706,20 +740,20 @@ const Tickets: React.FC = () => {
                     <div className="flex justify-between">
                       <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Customer:</span>
                       <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {selectedBooking.customer.name}
+                        {toDisplayTitle(selectedBooking.customer.name)}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between">
                     <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Date:</span>
                     <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {selectedBooking.show?.date ? format(new Date(selectedBooking.show.date), 'MMM dd, yyyy') : 'N/A'}
+                      {formatDisplayDateValue(selectedBooking.show?.date, 'N/A')}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Time:</span>
                     <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {selectedBooking.show?.time ? format(new Date(`2000-01-01T${selectedBooking.show.time}`), 'h:mm a') : 'N/A'}
+                      {formatDisplayTimeValue(selectedBooking.show?.time, 'N/A')}
                     </span>
                   </div>
                   <div>
@@ -758,7 +792,7 @@ const Tickets: React.FC = () => {
                     Booking Ref: {selectedBooking.booking_reference}
                   </div>
                   <div className={`transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Generated: {format(new Date(selectedBooking.generated_at), 'MMM dd, yyyy h:mm a')}
+                    Generated: {formatDisplayDateValue(selectedBooking.generated_at)} {format(new Date(selectedBooking.generated_at), 'h:mm a')}
                   </div>
                 </div>
               </div>
@@ -768,12 +802,12 @@ const Tickets: React.FC = () => {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <h4 className="font-black">Cancellation Request</h4>
                     <span className={`rounded-full px-3 py-1 text-xs font-black ${selectedBooking.cancellation_status === 'PENDING' ? 'bg-amber-500 text-white' : selectedBooking.cancellation_status === 'APPROVED' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-100'}`}>
-                      {selectedBooking.cancellation_status}
+                      {toDisplayTitle(selectedBooking.cancellation_status)}
                     </span>
                   </div>
                   {selectedBooking.cancellation_requested_at && (
                     <p className="mt-2 text-xs font-bold opacity-60">
-                      Requested {format(new Date(selectedBooking.cancellation_requested_at), 'MMM dd, yyyy h:mm a')}
+                      Requested {formatDisplayDateValue(selectedBooking.cancellation_requested_at)} {format(new Date(selectedBooking.cancellation_requested_at), 'h:mm a')}
                     </p>
                   )}
                   <div className={`mt-3 rounded-lg border p-3 text-sm font-semibold leading-6 ${darkMode ? 'border-slate-700 bg-slate-900/70' : 'border-slate-200 bg-white'}`}>

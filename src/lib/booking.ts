@@ -14,6 +14,19 @@ export const BOOKING_HOLD_DURATION_MS = BOOKING_HOLD_MINUTES * 60 * 1000;
 
 export const getRecordId = (record: any): string => String(record?.id || record?._id || "");
 
+export const getShowStartTime = (show: any): Date | null => {
+  const date = String(show?.date || "");
+  const time = String(show?.time || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) return null;
+  const startTime = new Date(`${date}T${time}`);
+  return Number.isFinite(startTime.getTime()) ? startTime : null;
+};
+
+export const isShowBookableAt = (show: any, now = new Date()): boolean => {
+  const startTime = getShowStartTime(show);
+  return Boolean(startTime && startTime.getTime() > now.getTime());
+};
+
 export const createBookingReference = (date = new Date()) => {
   const yy = String(date.getFullYear()).slice(-2);
   const mm = String(date.getMonth() + 1).padStart(2, "0");

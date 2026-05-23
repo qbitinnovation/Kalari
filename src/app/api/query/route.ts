@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB, { getGenericModel } from '@/lib/db';
 import mongoose from 'mongoose';
 import { localQuery } from '@/lib/localStore';
-import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity } from '@/lib/booking';
+import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity, isShowBookableAt } from '@/lib/booking';
 
 const normalizeIdValue = (value: any) => {
   if (typeof value === 'string' && mongoose.Types.ObjectId.isValid(value)) {
@@ -143,6 +143,18 @@ export async function POST(req: NextRequest) {
     const Model = getGenericModel(collection) as any;
 
     if (operation === "insert") {
+      if (collection === "bookings") {
+        const Show = getGenericModel("shows") as any;
+        const bookingShows = await Promise.all((insertPayload || []).map(async (booking: any) => {
+          const showId = String(booking?.show_id || "");
+          const byPublicId = showId ? await Show.findOne({ id: showId }).lean() : null;
+          if (byPublicId) return byPublicId;
+          return mongoose.Types.ObjectId.isValid(showId) ? Show.findById(showId).lean() : null;
+        }));
+        if (bookingShows.some((show) => !isShowBookableAt(show))) {
+          return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
+        }
+      }
       const docs = await Model.insertMany(insertPayload || []);
       return NextResponse.json({ data: docs });
     }

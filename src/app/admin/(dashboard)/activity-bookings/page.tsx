@@ -6,7 +6,9 @@ import { CalendarDays, Plus, RefreshCw, Ticket, Trash2, User } from "lucide-reac
 import { db, Customer } from "@/lib/database";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
-import { Button, Input, Select } from "@/components/ui";
+import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, Button, Input, Select } from "@/components/ui";
+import { formatDisplayDateValue } from "@/components/ui/date-utils";
+import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = {
   id: string;
@@ -260,7 +262,7 @@ export default function ActivityBookingsPage() {
           </div>
         </section>
 
-        <section className={`rounded-2xl border shadow-sm ${darkMode ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"}`}>
+        <AdminTablePanel>
           <div className="border-b border-slate-200 p-6 dark:border-slate-800">
             <h2 className="text-xl font-black">Recent Activity Bookings</h2>
           </div>
@@ -269,9 +271,8 @@ export default function ActivityBookingsPage() {
           ) : bookings.length === 0 ? (
             <div className="p-10 text-center opacity-60">No activity bookings yet.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-                <thead>
+              <AdminTable>
+                <AdminTableHead>
                   <tr className="text-left text-xs font-black uppercase tracking-widest opacity-60">
                     <th className="px-6 py-4">Booking</th>
                     <th className="px-6 py-4">Customer</th>
@@ -280,8 +281,8 @@ export default function ActivityBookingsPage() {
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4 text-right">Action</th>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                </AdminTableHead>
+                <AdminTableBody>
                   {bookings.map((booking) => {
                     const ticketCount = (() => {
                       try {
@@ -294,14 +295,14 @@ export default function ActivityBookingsPage() {
                     return (
                       <tr key={recordId(booking)}>
                           <td className="px-6 py-4">
-                            <div className="font-bold">{booking.show?.title || "Activity"}</div>
+                            <div className="font-bold">{toDisplayTitle(booking.show?.title, "Activity")}</div>
                             <div className="mt-1 font-mono text-xs font-black text-amber-600">{getBookingReference(booking)}</div>
-                            <div className="mt-1 flex items-center gap-1 text-xs opacity-60"><CalendarDays className="h-3 w-3" /> {booking.show?.date ? format(new Date(booking.show.date), "MMM dd, yyyy") : "No date"} {booking.show?.time}</div>
+                            <div className="mt-1 flex items-center gap-1 text-xs opacity-60"><CalendarDays className="h-3 w-3" /> {formatDisplayDateValue(booking.show?.date, "No date")} {booking.show?.time}</div>
                           </td>
                         <td className="px-6 py-4"><span className="inline-flex items-center gap-2"><User className="h-4 w-4" /> {booking.customer?.name || booking.booked_by}</span></td>
                         <td className="px-6 py-4"><span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4" /> {ticketCount}</span></td>
                         <td className="px-6 py-4 font-black">Rs. {booking.total_amount || (ticketCount * Number(booking.show?.price || 0))}</td>
-                        <td className="px-6 py-4"><span className={`rounded-full px-3 py-1 text-xs font-black ${booking.status === "CONFIRMED" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{booking.status}</span></td>
+                        <td className="px-6 py-4"><span className={`rounded-full px-3 py-1 text-xs font-black ${booking.status === "CONFIRMED" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{toDisplayTitle(booking.status)}</span></td>
                         <td className="px-6 py-4 text-right">
                           {booking.status === "CONFIRMED" && (
                             <button onClick={() => cancelBooking(booking)} className="rounded-lg p-2 text-red-600 hover:bg-red-50" aria-label="Cancel booking">
@@ -312,11 +313,10 @@ export default function ActivityBookingsPage() {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </AdminTableBody>
+              </AdminTable>
           )}
-        </section>
+        </AdminTablePanel>
       </div>
     </div>
   );

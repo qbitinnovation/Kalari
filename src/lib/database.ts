@@ -156,6 +156,7 @@ export interface Show {
   type?: 'KALARI' | 'EVENT';
   capacity?: number;
   layout_id?: string;
+  agent_id?: string;
   active: boolean;
   status?: "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE";
   booked_count?: number;

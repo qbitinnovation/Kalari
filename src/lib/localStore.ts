@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { getSeedData } from "./seedData";
-import { AGENT_DEFAULT_COMMISSION_PERCENTAGE, countBookedSeats, getAvailabilityStatus, getShowCapacity } from "./booking";
+import { AGENT_DEFAULT_COMMISSION_PERCENTAGE, countBookedSeats, getAvailabilityStatus, getShowCapacity, isShowBookableAt } from "./booking";
 
 type Store = Record<string, any[]>;
 
@@ -127,6 +127,11 @@ export const localQuery = async ({
   store[collection] = store[collection] || [];
 
   if (operation === "insert") {
+    if (collection === "bookings") {
+      const showById = new Map((store.shows || []).map((show) => [String(recordId(show)), show]));
+      const closedShow = (insertPayload || []).find((booking: any) => !isShowBookableAt(showById.get(String(booking.show_id))));
+      if (closedShow) throw new Error("Booking is closed because this show time has passed.");
+    }
     const rows = (insertPayload || []).map((row: any) => ({
       id: row.id || `${collection}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       ...row,

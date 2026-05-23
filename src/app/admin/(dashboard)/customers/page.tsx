@@ -5,8 +5,10 @@ import { db, Customer } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
-import { Button, Input, Textarea } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, Button, Input, SearchInput, Textarea } from '@/components/ui'
 import { getRecordId } from '@/lib/booking'
+import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
+import { formatDisplayDateValue } from '@/components/ui/date-utils'
 import {
   PlusIcon,
   PencilIcon,
@@ -15,7 +17,6 @@ import {
   EnvelopeIcon,
   PhoneIcon,
   MapPinIcon,
-  MagnifyingGlassIcon,
   XMarkIcon
 } from '@heroicons/react/24/outline'
 
@@ -159,34 +160,17 @@ const Customers: React.FC = () => {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className={`text-2xl sm:text-3xl font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-          Customer Management
-        </h1>
-        <p className={`mt-2 text-sm sm:text-base transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-          Manage customer information and view booking history
-        </p>
-      </div>
-
-      {/* Header Actions */}
-      <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="flex-1 max-w-md">
-            <div className="relative">
-              <MagnifyingGlassIcon className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
-              <input
-                type="text"
-                placeholder="Search customers..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className={`w-full pl-10 pr-4 py-2 rounded-lg border transition-colors duration-200 ${
-                  darkMode 
-                    ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-400 focus:border-slate-500' 
-                    : 'bg-white border-slate-300 text-slate-900 placeholder-slate-500 focus:border-slate-400'
-                } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
-              />
-            </div>
-          </div>
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className={`text-2xl sm:text-3xl font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+            Customer Management
+          </h1>
+          <p className={`mt-2 text-sm sm:text-base transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+            Manage customer information and view booking history
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
+          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search customers..." containerClassName="w-full sm:w-80" />
           <Button onClick={() => setShowModal(true)}>
             <PlusIcon className="h-5 w-5" />
             Add Customer
@@ -195,7 +179,7 @@ const Customers: React.FC = () => {
       </div>
 
       {/* Customers List */}
-      <div className={`rounded-2xl shadow-sm border transition-colors duration-200 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+      <AdminTablePanel>
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
@@ -211,10 +195,8 @@ const Customers: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
-                <thead className={`${darkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
+              <AdminTable>
+                <AdminTableHead>
                   <tr>
                     <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                       Customer
@@ -232,8 +214,8 @@ const Customers: React.FC = () => {
                       Actions
                     </th>
                   </tr>
-                </thead>
-                <tbody className={`divide-y ${darkMode ? 'divide-slate-700' : 'divide-slate-200'}`}>
+                </AdminTableHead>
+                <AdminTableBody>
                   {filteredCustomers.map((customer, index) => (
                     <motion.tr
                       key={getRecordId(customer) || `customer-row-${index}`}
@@ -245,12 +227,12 @@ const Customers: React.FC = () => {
                         <div className="flex items-center">
                           <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center">
                             <span className="text-white font-medium text-sm">
-                              {customer.name.charAt(0).toUpperCase()}
+                            {toDisplayInitial(customer.name)}
                             </span>
                           </div>
                           <div className="ml-4">
                             <div className={`text-sm font-medium ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                              {customer.name}
+                              {toDisplayTitle(customer.name)}
                             </div>
                           </div>
                         </div>
@@ -291,7 +273,7 @@ const Customers: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className={`text-sm ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                          {format(new Date(customer.created_at), 'MMM dd, yyyy')}
+                          {formatDisplayDateValue(customer.created_at)}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -314,12 +296,10 @@ const Customers: React.FC = () => {
                       </td>
                     </motion.tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </AdminTableBody>
+              </AdminTable>
         )}
-      </div>
+      </AdminTablePanel>
 
       {/* Add/Edit Customer Modal */}
       {showModal && (

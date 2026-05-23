@@ -11,7 +11,8 @@ import {
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logActivity } from '@/utils/activityLogger'
 import { getBookingReference } from '@/lib/booking'
-import { DatePicker } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, DatePicker } from '@/components/ui'
+import { formatDisplayDateValue, formatDisplayTimeValue } from '@/components/ui/date-utils'
 
 interface BookingReport {
   booking_id: string
@@ -190,13 +191,13 @@ const Reports: React.FC = () => {
     const csvData = bookingData.map(booking => [
       booking.booking_reference,
       booking.show_title,
-      format(new Date(booking.show_date), 'MMM dd, yyyy'),
+      formatDisplayDateValue(booking.show_date),
       booking.show_time,
       booking.seat_codes.join('; '),
       booking.total_tickets,
       booking.total_amount,
       booking.booked_by,
-      format(new Date(booking.booking_time), 'MMM dd, yyyy h:mm a'),
+      `${formatDisplayDateValue(booking.booking_time)} ${format(new Date(booking.booking_time), 'h:mm a')}`,
       booking.status
     ])
 
@@ -245,13 +246,26 @@ const Reports: React.FC = () => {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className={`text-3xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>Reports</h1>
-        <p className={`mt-2 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Generate booking reports and export data</p>
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className={`text-3xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>Reports</h1>
+          <p className={`mt-2 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Generate booking reports and export data</p>
+        </div>
+        <DatePicker
+          label="Filter by Date"
+          value={selectedDate}
+          onChange={setSelectedDate}
+          placeholder="All dates"
+          presets={[
+            { label: 'Clear Filter', value: 'clear' },
+            { label: 'Today', value: 'today' },
+          ]}
+          className="w-full sm:w-64"
+        />
       </div>
 
       {/* Date Filter */}
-      <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className="hidden">
         <h2 className={`text-lg font-medium mb-4 transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>Filter by Date</h2>
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
           <DatePicker
@@ -271,7 +285,7 @@ const Reports: React.FC = () => {
         <div className="mt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
             {selectedDate ? (
-              <>Showing {shows.length} show(s) for {format(new Date(selectedDate), 'MMM dd, yyyy')}</>
+              <>Showing {shows.length} show(s) for {formatDisplayDateValue(selectedDate)}</>
             ) : (
               <>Showing {shows.length} show(s) (all dates)</>
             )}
@@ -280,7 +294,7 @@ const Reports: React.FC = () => {
             <div className={`text-xs px-2 py-1 rounded-full transition-colors duration-200 ${
               darkMode ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700'
             }`}>
-              Filtered by: {format(new Date(selectedDate), 'MMM dd, yyyy')}
+              Filtered by: {formatDisplayDateValue(selectedDate)}
             </div>
           )}
         </div>
@@ -290,14 +304,14 @@ const Reports: React.FC = () => {
       <div className={`rounded-2xl shadow-sm border p-6 mb-6 transition-colors duration-200 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold mb-4 flex items-center transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
           <CalendarIcon className="h-5 w-5 mr-2" />
-          Select Show for Report {selectedDate && `(${format(new Date(selectedDate), 'MMM dd, yyyy')})`}
+          Select Show for Report {selectedDate && `(${formatDisplayDateValue(selectedDate)})`}
         </h2>
         
         {shows.length === 0 ? (
           <div className={`text-center py-8 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
             {selectedDate ? (
               <>
-                <div className="text-lg mb-2">No shows available for {format(new Date(selectedDate), 'MMM dd, yyyy')}</div>
+                <div className="text-lg mb-2">No shows available for {formatDisplayDateValue(selectedDate)}</div>
                 <div className="text-sm">Try selecting a different date or clear the filter to see all shows.</div>
               </>
             ) : (
@@ -328,7 +342,7 @@ const Reports: React.FC = () => {
             >
               <div className={`font-medium transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>{show.title}</div>
               <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                {format(new Date(show.date), 'MMM dd, yyyy')} at {format(new Date(`2000-01-01T${show.time}`), 'h:mm a')}
+                {formatDisplayDateValue(show.date)} at {formatDisplayTimeValue(show.time)}
               </div>
               <div className="text-sm font-medium text-blue-600">₹{show.price}</div>
               <div className="mt-2">
@@ -406,9 +420,9 @@ const Reports: React.FC = () => {
 
               {/* Booking Details Table */}
               {bookingData.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className={`transition-colors duration-200 ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <AdminTablePanel>
+                  <AdminTable>
+                    <AdminTableHead>
                       <tr>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                           Booking Ref
@@ -432,8 +446,8 @@ const Reports: React.FC = () => {
                           Status
                         </th>
                       </tr>
-                    </thead>
-                    <tbody className={`divide-y transition-colors duration-200 ${darkMode ? 'bg-gray-800 divide-gray-700' : 'bg-white divide-gray-200'}`}>
+                    </AdminTableHead>
+                    <AdminTableBody>
                       {bookingData.map((booking) => (
                         <tr key={booking.booking_id} className={`transition-colors duration-200 ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}`}>
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -469,7 +483,7 @@ const Reports: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {format(new Date(booking.booking_time), 'MMM dd, yyyy')}
+                              {formatDisplayDateValue(booking.booking_time)}
                             </div>
                             <div className="text-sm text-gray-500">
                               {format(new Date(booking.booking_time), 'h:mm a')}
@@ -486,9 +500,9 @@ const Reports: React.FC = () => {
                           </td>
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </AdminTableBody>
+                  </AdminTable>
+                </AdminTablePanel>
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   No bookings found for this show.

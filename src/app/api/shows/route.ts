@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB, { getGenericModel } from "@/lib/db";
 import { localQuery } from "@/lib/localStore";
-import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity } from "@/lib/booking";
+import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity, isShowBookableAt } from "@/lib/booking";
 
 const enrichShows = async (shows: any[]) => {
   const Layout = getGenericModel("layouts") as any;
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     if (activityId) filters.activity_id = activityId;
 
     const shows = await Show.find(filters).sort({ date: 1, time: 1 }).lean();
-    return NextResponse.json({ data: await enrichShows(shows) });
+    return NextResponse.json({ data: await enrichShows(upcoming ? shows.filter((show: any) => isShowBookableAt(show)) : shows) });
   } catch (error: any) {
     const { searchParams } = new URL(req.url);
     const rangeFilters: Record<string, any> = {};
@@ -60,6 +60,6 @@ export async function GET(req: NextRequest) {
     }
     if (searchParams.get("activityId")) filters.activity_id = searchParams.get("activityId");
     const data = await localQuery({ collection: "shows", filters, rangeFilters, orderBy: { column: "date", ascending: true } });
-    return NextResponse.json({ data, fallback: true });
+    return NextResponse.json({ data: searchParams.get("upcoming") !== "false" ? data.filter((show: any) => isShowBookableAt(show)) : data, fallback: true });
   }
 }
