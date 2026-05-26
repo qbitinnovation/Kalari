@@ -30,7 +30,7 @@ export const PublicFooter: React.FC = () => {
             <h4 className="text-sm font-black uppercase tracking-widest text-primary-700 mb-6">Quick Links</h4>
             <ul className="space-y-4">
               <li><Link href="/about" className="text-stone-600 hover:text-primary-700 transition-colors text-sm font-bold">About Us</Link></li>
-              <li><Link href="/schedule" className="text-stone-600 hover:text-primary-700 transition-colors text-sm font-bold">Show Schedule</Link></li>
+              <li><Link href="/shows" className="text-stone-600 hover:text-primary-700 transition-colors text-sm font-bold">Shows</Link></li>
               <li><Link href="/contact" className="text-stone-600 hover:text-primary-700 transition-colors text-sm font-bold">Get in Touch</Link></li>
               <li><Link href="/book" className="text-stone-600 hover:text-primary-700 transition-colors text-sm font-bold">Book Tickets</Link></li>
             </ul>

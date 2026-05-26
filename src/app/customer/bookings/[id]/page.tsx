@@ -26,6 +26,12 @@ type BookingRow = Booking & {
     type?: "KALARI" | "EVENT";
     description?: string;
   };
+  activity?: {
+    title: string;
+    price?: number;
+    booking_price?: number;
+    description?: string;
+  };
 };
 
 const SESSION_KEY = "kalari_customer";
@@ -62,9 +68,9 @@ export default function CustomerBookingDetailPage() {
 
   const fetchBooking = async (customerId: string) => {
     setLoading(true);
-    let { data, error } = await db.from("bookings").select("*, show:shows(*)").eq("booking_reference", bookingId).single();
+    let { data, error } = await db.from("bookings").select("*, show:shows(*), activity:activities(*)").eq("booking_reference", bookingId).single();
     if (!data) {
-      const fallback = await db.from("bookings").select("*, show:shows(*)").eq("id", bookingId).single();
+      const fallback = await db.from("bookings").select("*, show:shows(*), activity:activities(*)").eq("id", bookingId).single();
       data = fallback.data;
       error = fallback.error;
     }
@@ -82,10 +88,17 @@ export default function CustomerBookingDetailPage() {
 
   const seats = useMemo(() => parseSeatCodes(booking?.seat_code), [booking]);
   const bookingReference = booking ? getBookingReference(booking) : "";
-  const isEventBooking = booking?.show?.type === "EVENT" || seats.every(isGeneralAdmissionSeatCode);
+  const isActivityBooking = booking?.booking_type === "ACTIVITY" || Boolean(booking?.activity_id);
+  const isEventBooking = isActivityBooking || booking?.show?.type === "EVENT" || seats.every(isGeneralAdmissionSeatCode);
   const ticketDisplayValue = isEventBooking ? `GENERAL${tickets.length > 1 ? ` x ${tickets.length}` : ""}` : seats.join(", ");
   const qrValue = bookingReference;
-  const isUpcoming = booking?.show?.date && booking?.show?.time ? new Date(`${booking.show.date}T${booking.show.time}`) >= new Date() : false;
+  const displayTitle = booking?.show?.title || booking?.activity?.title || "Booking";
+  const displayDescription = booking?.show?.description || booking?.activity?.description || "Show this QR ticket at the venue entrance.";
+  const displayDate = isActivityBooking ? booking?.booking_date : booking?.show?.date;
+  const displayTime = isActivityBooking ? "" : booking?.show?.time;
+  const isUpcoming = isActivityBooking
+    ? Boolean(displayDate && new Date(`${displayDate}T23:59`) >= new Date())
+    : booking?.show?.date && booking?.show?.time ? new Date(`${booking.show.date}T${booking.show.time}`) >= new Date() : false;
   const canRequestCancel = Boolean(booking && isUpcoming && booking.status === "CONFIRMED" && booking.cancellation_status !== "PENDING");
 
   const requestCancellation = async (event: React.FormEvent) => {
@@ -143,9 +156,9 @@ export default function CustomerBookingDetailPage() {
     <main className="min-h-screen bg-[#f7f3eb] pt-24 text-stone-950 print:bg-white print:pt-0">
       <CustomerPrintTicket
         bookingReference={bookingReference}
-        showTitle={booking.show?.title || "Booking"}
-        date={formatDisplayDateValue(booking.show?.date, "N/A")}
-        time={formatDisplayTimeValue(booking.show?.time, "N/A")}
+        showTitle={displayTitle}
+        date={formatDisplayDateValue(displayDate, "N/A")}
+        time={displayTime ? formatDisplayTimeValue(displayTime, "N/A") : "General admission"}
         guestName={customer?.name || "Guest"}
         admissionLabel={isEventBooking ? "Admission" : "Seats"}
         admissionValue={ticketDisplayValue || `${tickets.length} ticket(s)`}
@@ -172,8 +185,8 @@ export default function CustomerBookingDetailPage() {
                   Confirmed Booking
                 </div>
                 {booking.cancellation_status === "PENDING" && <div className="mb-3 rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">Cancellation requested</div>}
-                <h1 className="text-3xl font-black">{booking.show?.title || "Booking"}</h1>
-                <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-stone-500">{booking.show?.description || "Show this QR ticket at the venue entrance."}</p>
+                <h1 className="text-3xl font-black">{displayTitle}</h1>
+                <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-stone-500">{displayDescription}</p>
               </div>
               <div className="text-left sm:text-right">
                 <div className="text-xs font-black uppercase tracking-wider text-stone-400">Total</div>
@@ -184,8 +197,8 @@ export default function CustomerBookingDetailPage() {
             <div className="grid gap-3 rounded-lg bg-stone-50 p-4 sm:grid-cols-2">
               <Info label="Booking Ref" value={bookingReference} mono />
               <Info label="Payment" value={booking.payment_status || "Recorded"} />
-              <Info label="Date" value={formatDisplayDateValue(booking.show?.date, "N/A")} icon={<CalendarDays className="h-4 w-4" />} />
-              <Info label="Time" value={formatDisplayTimeValue(booking.show?.time, "N/A")} icon={<Clock className="h-4 w-4" />} />
+              <Info label="Date" value={formatDisplayDateValue(displayDate, "N/A")} icon={<CalendarDays className="h-4 w-4" />} />
+              <Info label="Time" value={displayTime ? formatDisplayTimeValue(displayTime, "N/A") : "General admission"} icon={<Clock className="h-4 w-4" />} />
               <div className="sm:col-span-2">
                 <Info label={isEventBooking ? "Admission" : "Seats"} value={ticketDisplayValue || `${tickets.length} ticket(s)`} />
               </div>

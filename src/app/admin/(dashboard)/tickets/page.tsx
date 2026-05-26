@@ -3,27 +3,35 @@
 import React, { useState, useEffect } from 'react'
 import { db, Ticket } from '@/lib/database'
 import { format } from 'date-fns'
+import { AnimatePresence, motion } from 'framer-motion'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { 
   PrinterIcon, 
   XMarkIcon,
-  EyeIcon
+  EyeIcon,
+  ArrowDownTrayIcon,
+  DocumentArrowDownIcon
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
 import { getBookingReference, isGeneralAdmissionSeatCode } from '@/lib/booking'
 import { toDisplayTitle } from '@/lib/textFormat'
-import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, DatePicker, SearchInput } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, DatePicker, SearchInput, Select } from '@/components/ui'
 import { formatDisplayDateValue, formatDisplayTimeValue } from '@/components/ui/date-utils'
 
-interface TicketWithDetails extends Ticket {
+interface TicketWithDetails extends Omit<Ticket, 'show' | 'activity' | 'booking'> {
   show?: {
     title: string
     date: string
     time: string
     type?: 'KALARI' | 'EVENT'
   }
-    booking?: {
+  activity?: {
+    title: string
+    price?: number
+    booking_price?: number
+  }
+  booking?: {
     id?: string
     _id?: string
     booking_reference?: string
@@ -38,6 +46,13 @@ interface TicketWithDetails extends Ticket {
       email?: string
       phone?: string
     }
+    activity?: {
+      title: string
+      price?: number
+      booking_price?: number
+    }
+    booking_date?: string
+    booking_type?: 'SHOW' | 'ACTIVITY'
   }
   booked_by: string
 }
@@ -51,6 +66,13 @@ interface BookingGroup {
     time: string
     type?: 'KALARI' | 'EVENT'
   }
+  activity?: {
+    title: string
+    price?: number
+    booking_price?: number
+  }
+  booking_date?: string
+  booking_type?: 'SHOW' | 'ACTIVITY'
   tickets: TicketWithDetails[]
   total_price: number
   seat_codes: string[]
@@ -107,14 +129,18 @@ const Tickets: React.FC = () => {
         .select(`
           *,
           show:shows(title, date, time, type),
+          activity:activities(title, price, booking_price),
           booking:bookings(
             booking_reference,
+            booking_date,
+            booking_type,
             customer_id,
             agent_id,
             status,
             cancellation_status,
             cancellation_reason,
             cancellation_requested_at,
+            activity:activities(title, price, booking_price),
             customer:customers(name, email, phone)
           )
         `)
@@ -132,6 +158,9 @@ const Tickets: React.FC = () => {
             booking_id: ticket.booking_id,
             booking_reference: getBookingReference(ticket.booking || { id: ticket.booking_id }),
             show: ticket.show,
+            activity: ticket.activity || ticket.booking?.activity,
+            booking_date: ticket.booking?.booking_date,
+            booking_type: ticket.booking?.booking_type,
             tickets: [],
             total_price: 0,
             seat_codes: [],
@@ -171,6 +200,7 @@ const Tickets: React.FC = () => {
       booking.booking_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.booking_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.show?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      booking.activity?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.seat_codes.some(code => code.toLowerCase().includes(searchTerm.toLowerCase())) ||
       booking.tickets.some(ticket => ticket.ticket_code.toLowerCase().includes(searchTerm.toLowerCase())) ||
       booking.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -187,7 +217,7 @@ const Tickets: React.FC = () => {
   })
 
   const isEventBooking = (booking: BookingGroup) =>
-    booking.show?.type === 'EVENT' || booking.seat_codes.every(isGeneralAdmissionSeatCode)
+    booking.booking_type === 'ACTIVITY' || booking.show?.type === 'EVENT' || booking.seat_codes.every(isGeneralAdmissionSeatCode)
 
   const getTicketDisplayLabel = (booking: BookingGroup) => isEventBooking(booking) ? 'Admission' : 'Seats'
 
@@ -196,6 +226,15 @@ const Tickets: React.FC = () => {
 
   const getQrValue = (booking: BookingGroup) =>
     booking.booking_reference
+
+  const getBookingTitle = (booking: BookingGroup) =>
+    toDisplayTitle(booking.show?.title || booking.activity?.title, 'Booking')
+
+  const getBookingDate = (booking: BookingGroup) =>
+    booking.booking_type === 'ACTIVITY' ? booking.booking_date : booking.show?.date
+
+  const getBookingTime = (booking: BookingGroup) =>
+    booking.booking_type === 'ACTIVITY' ? null : booking.show?.time
 
   const canReviewCancellation = (booking: BookingGroup) =>
     (user?.role === 'admin' || user?.role === 'staff') && booking.cancellation_status === 'PENDING'
@@ -353,17 +392,17 @@ const Tickets: React.FC = () => {
               <div class="header">
                 <div class="title">${isEventBooking(booking) ? 'EVENT TICKET' : 'KALARI BOOKING'}</div>
                 <div class="divider"></div>
-                <div class="show-title">${booking.show?.title || 'N/A'}</div>
+                <div class="show-title">${getBookingTitle(booking)}</div>
               </div>
               
               <div class="info-section">
                 <div class="info-row">
                   <span class="info-label">Date:</span>
-                  <span class="info-value">${formatDisplayDateValue(booking.show?.date, 'N/A')}</span>
+                  <span class="info-value">${formatDisplayDateValue(getBookingDate(booking), 'N/A')}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">Time:</span>
-                  <span class="info-value">${formatDisplayTimeValue(booking.show?.time, 'N/A')}</span>
+                  <span class="info-value">${getBookingTime(booking) ? formatDisplayTimeValue(getBookingTime(booking), 'N/A') : 'General admission'}</span>
                 </div>
                 <div class="seats-section">
                   <div class="seats-label">${getTicketDisplayLabel(booking)}:</div>
@@ -411,6 +450,32 @@ const Tickets: React.FC = () => {
     printWindow.document.close()
   }
 
+  const handleDownloadBooking = (booking: BookingGroup) => {
+    const content = [
+      'KOVALAM KALARI TICKET',
+      `Booking Ref: ${booking.booking_reference}`,
+      `Title: ${getBookingTitle(booking)}`,
+      `Date: ${formatDisplayDateValue(getBookingDate(booking), 'N/A')}`,
+      `Time: ${getBookingTime(booking) ? formatDisplayTimeValue(getBookingTime(booking), 'N/A') : 'General admission'}`,
+      `Customer: ${booking.customer?.name || booking.booked_by || 'N/A'}`,
+      `${getTicketDisplayLabel(booking)}: ${getTicketDisplayValues(booking).join(', ')}`,
+      `Quantity: ${booking.tickets.length}`,
+      `Total: Rs. ${booking.total_price}`,
+      `Status: ${booking.status}`,
+      `QR Value: ${getQrValue(booking)}`,
+    ].join('\n')
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${booking.booking_reference || booking.booking_id}-ticket.txt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -449,17 +514,20 @@ const Tickets: React.FC = () => {
               ]}
               className="w-full sm:w-44"
             />
-            <select
+            <Select
+              label="Status"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className={`min-h-11 w-full rounded-xl border px-3 py-2.5 text-sm font-medium outline-none focus:ring-[3px] focus:ring-primary-500/20 sm:w-40 ${darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}
-            >
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="completed">Completed</option>
-              <option value="revoked">Revoked</option>
-              <option value="cancellation-pending">Cancellation Requests</option>
-            </select>
+              onChange={setStatusFilter}
+              placeholder="All Status"
+              options={[
+                { value: 'all', label: 'All Status' },
+                { value: 'active', label: 'Active' },
+                { value: 'completed', label: 'Completed' },
+                { value: 'revoked', label: 'Revoked' },
+                { value: 'cancellation-pending', label: 'Cancellation Requests' },
+              ]}
+              className="w-full sm:w-44"
+            />
           </div>
         </div>
       </div>
@@ -532,41 +600,35 @@ const Tickets: React.FC = () => {
 
       {/* Bookings Table */}
       <AdminTablePanel>
-            <AdminTable>
+            <AdminTable className="table-fixed">
               <AdminTableHead>
                 <tr>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <th className={`w-[18%] px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Booking Ref
                   </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Show
+                  <th className={`w-[24%] px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Booking
                   </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <th className={`w-[26%] px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Customer
                   </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Seats / Tickets
-                  </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <th className={`w-[12%] px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Quantity
                   </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Total Price
+                  <th className={`w-[12%] px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Total
                   </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <th className={`w-[12%] px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Status
                   </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Generated
-                  </th>
-                  <th className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <th className={`w-[8%] px-6 py-4 text-right text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     Actions
                   </th>
                 </tr>
               </AdminTableHead>
               <AdminTableBody>
                 {filteredBookings.length === 0 && (
-                  <AdminTableEmpty colSpan={9}>
+                  <AdminTableEmpty colSpan={7}>
                     {searchTerm || statusFilter !== 'all' || selectedDate
                       ? 'No ticket history matches the current filters.'
                       : 'No ticket history to display.'}
@@ -575,7 +637,7 @@ const Tickets: React.FC = () => {
                 {filteredBookings.map((booking) => (
                   <tr key={booking.booking_id} className={`transition-colors duration-200 ${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}`}>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-mono transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                      <div className={`truncate text-sm font-mono transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`} title={booking.booking_reference}>
                         {booking.booking_reference}
                       </div>
                       {booking.cancellation_status === 'PENDING' && (
@@ -585,33 +647,33 @@ const Tickets: React.FC = () => {
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>{toDisplayTitle(booking.show?.title)}</div>
-                      <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {formatDisplayDateValue(booking.show?.date, 'N/A')}
+                      <div className={`truncate text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`} title={getBookingTitle(booking)}>{getBookingTitle(booking)}</div>
+                      <div className={`truncate text-sm transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {formatDisplayDateValue(getBookingDate(booking), 'N/A')}
                       </div>
-                      <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {formatDisplayTimeValue(booking.show?.time, 'N/A')}
+                      <div className={`truncate text-xs transition-colors duration-200 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {getBookingTime(booking) ? formatDisplayTimeValue(getBookingTime(booking), 'N/A') : 'General admission'}
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       {booking.customer ? (
-                        <div className="flex items-center">
-                          <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center mr-3">
+                        <div className="flex min-w-0 items-center">
+                          <div className="w-8 h-8 shrink-0 bg-blue-500 rounded-full flex items-center justify-center mr-3">
                             <span className="text-white font-medium text-sm">
                               {booking.customer.name.charAt(0).toUpperCase()}
                             </span>
                           </div>
-                          <div>
-                            <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
+                          <div className="min-w-0">
+                            <div className={`truncate text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`} title={booking.customer.name}>
                               {toDisplayTitle(booking.customer.name)}
                             </div>
                             {booking.customer.email && (
-                              <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              <div className={`truncate text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} title={booking.customer.email}>
                             {booking.customer.email}
                               </div>
                             )}
                             {booking.customer.phone && (
-                              <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              <div className={`truncate text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} title={booking.customer.phone}>
                                 {booking.customer.phone}
                               </div>
                             )}
@@ -623,26 +685,13 @@ const Tickets: React.FC = () => {
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-4">
-                      <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {getTicketDisplayValues(booking).length > 3 
-                          ? `${getTicketDisplayValues(booking).slice(0, 3).join(', ')}...` 
-                          : getTicketDisplayValues(booking).join(', ')
-                        }
-                      </div>
-                      {getTicketDisplayValues(booking).length > 3 && (
-                        <div className={`text-xs transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          +{getTicketDisplayValues(booking).length - 3} more
-                        </div>
-                      )}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
                         {booking.tickets.length} ticket(s)
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>₹{booking.total_price}</div>
+                      <div className={`text-sm font-medium transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>Rs. {booking.total_price}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex justify-start">
@@ -663,16 +712,8 @@ const Tickets: React.FC = () => {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {formatDisplayDateValue(booking.generated_at)}
-                      </div>
-                      <div className={`text-sm transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {format(new Date(booking.generated_at), 'h:mm a')}
-                      </div>
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-2">
+                      <div className="flex justify-end gap-2">
                         <button
                           onClick={() => {
                             setSelectedBooking(booking)
@@ -684,15 +725,6 @@ const Tickets: React.FC = () => {
                         >
                           <EyeIcon className="h-5 w-5" />
                         </button>
-                        {(booking.status === 'ACTIVE' || booking.status === 'COMPLETED') && (
-                          <button
-                            onClick={() => handlePrintBooking(booking)}
-                            className="text-green-600 hover:text-green-900"
-                            title="Print"
-                          >
-                            <PrinterIcon className="h-5 w-5" />
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -701,14 +733,35 @@ const Tickets: React.FC = () => {
             </AdminTable>
       </AdminTablePanel>
 
-      {/* Preview Modal */}
+      {/* Details Sheet */}
+      <AnimatePresence>
       {showPreview && selectedBooking && (
-        <div className="admin-modal-overlay">
-          <div className="admin-modal-panel admin-modal-card">
+        <motion.div
+          key="ticket-details-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="admin-modal-overlay !items-stretch !justify-end !p-0"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowPreview(false)
+              setSelectedBooking(null)
+            }
+          }}
+        >
+          <motion.div
+            initial={{ x: 560, opacity: 0.98 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 560, opacity: 0.98 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+            className="admin-modal-panel flex h-full w-full max-w-2xl flex-col overflow-hidden rounded-none bg-white shadow-2xl dark:bg-slate-900 sm:rounded-l-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
               <div className="admin-modal-header">
                 <div>
-                  <h3 className="admin-modal-title">Ticket Preview</h3>
-                  <p className="admin-modal-subtitle">Review QR ticket details before printing.</p>
+                  <h3 className="admin-modal-title">Ticket Details</h3>
+                  <p className="admin-modal-subtitle">{selectedBooking.booking_reference}</p>
                 </div>
                 <button
                   onClick={() => {
@@ -722,79 +775,63 @@ const Tickets: React.FC = () => {
                 </button>
               </div>
 
-            <div className="admin-modal-body">
-              {/* Ticket Content */}
-              <div className={`border-2 border-dashed p-4 rounded-xl transition-colors duration-200 ${darkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-300 bg-slate-50'}`}>
-                <div className="text-center mb-4">
-                  <h4 className={`text-xl font-bold transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                    {isEventBooking(selectedBooking) ? 'EVENT TICKET' : 'KALARI BOOKING'}
-                  </h4>
-                  <div className={`h-px my-2 transition-colors duration-200 ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
-                  <h5 className={`text-lg font-semibold transition-colors duration-200 ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                    {selectedBooking.show?.title || 'N/A'}
-                  </h5>
+            <div className="admin-modal-body space-y-5">
+              <div className={`rounded-2xl border p-5 ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+                  <div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-2xl bg-white p-3 ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+                    <QRCode
+                      value={getQrValue(selectedBooking)}
+                      size={108}
+                      bgColor="#ffffff"
+                      fgColor="#000000"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black uppercase tracking-widest text-amber-600">
+                      {isEventBooking(selectedBooking) ? 'General admission ticket' : 'Kalari reserved ticket'}
+                    </p>
+                    <h4 className="mt-2 truncate text-2xl font-black" title={getBookingTitle(selectedBooking)}>
+                      {getBookingTitle(selectedBooking)}
+                    </h4>
+                    <p className="mt-2 truncate font-mono text-sm font-black text-slate-500 dark:text-slate-400" title={selectedBooking.booking_reference}>
+                      {selectedBooking.booking_reference}
+                    </p>
+                  </div>
                 </div>
+              </div>
 
-                <div className="space-y-3 mb-4">
-                  {selectedBooking.customer && (
-                    <div className="flex justify-between">
-                      <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Customer:</span>
-                      <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                        {toDisplayTitle(selectedBooking.customer.name)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Date:</span>
-                    <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {formatDisplayDateValue(selectedBooking.show?.date, 'N/A')}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Time:</span>
-                    <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {formatDisplayTimeValue(selectedBooking.show?.time, 'N/A')}
-                    </span>
-                  </div>
-                  <div>
-                    <span className={`font-medium block mb-1 transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{getTicketDisplayLabel(selectedBooking)}:</span>
-                    <div className={`border p-2 rounded text-center font-bold transition-colors duration-200 ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-slate-400 bg-slate-100 text-slate-900'}`}>
-                      {getTicketDisplayValues(selectedBooking).join(', ')}
-                    </div>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Quantity:</span>
-                    <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {selectedBooking.tickets.length} ticket(s)
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={`font-medium transition-colors duration-200 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Total Price:</span>
-                    <span className={`transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      ₹{selectedBooking.total_price}
-                    </span>
-                  </div>
+              <div className={`rounded-2xl border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                <div className={`border-b px-5 py-4 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <h4 className="font-black">Booking Details</h4>
                 </div>
+                {[
+                  ['Customer', selectedBooking.customer ? `${toDisplayTitle(selectedBooking.customer.name)}${selectedBooking.customer.phone ? ` - ${selectedBooking.customer.phone}` : ''}` : selectedBooking.booked_by || 'N/A'],
+                  ['Date', formatDisplayDateValue(getBookingDate(selectedBooking), 'N/A')],
+                  ['Time', getBookingTime(selectedBooking) ? formatDisplayTimeValue(getBookingTime(selectedBooking), 'N/A') : 'General admission'],
+                  ['Generated', `${formatDisplayDateValue(selectedBooking.generated_at)} ${format(new Date(selectedBooking.generated_at), 'h:mm a')}`],
+                ].map(([label, value]) => (
+                  <div key={label} className={`flex items-center justify-between gap-6 border-b px-5 py-4 last:border-b-0 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <div className="shrink-0 text-xs font-bold uppercase tracking-widest text-slate-400">{label}</div>
+                    <div className="min-w-0 truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200" title={value}>{value}</div>
+                  </div>
+                ))}
+              </div>
 
-                {/* QR Code */}
-                <div className="text-center mb-4">
-                  <QRCode
-                    value={getQrValue(selectedBooking)}
-                    size={120}
-                    bgColor={darkMode ? '#1e293b' : '#ffffff'}
-                    fgColor={darkMode ? '#f1f5f9' : '#000000'}
-                    className="mx-auto"
-                  />
+              <div className={`rounded-2xl border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                <div className={`border-b px-5 py-4 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <h4 className="font-black">Ticket Details</h4>
                 </div>
-
-                <div className="text-center text-xs space-y-1">
-                  <div className={`transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Booking Ref: {selectedBooking.booking_reference}
+                {[
+                  [getTicketDisplayLabel(selectedBooking), getTicketDisplayValues(selectedBooking).join(', ')],
+                  ['Quantity', `${selectedBooking.tickets.length} ticket(s)`],
+                  ['Total Price', `Rs. ${selectedBooking.total_price}`],
+                  ['Ticket Status', toDisplayTitle(selectedBooking.status)],
+                ].map(([label, value]) => (
+                  <div key={label} className={`flex items-center justify-between gap-6 border-b px-5 py-4 last:border-b-0 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <div className="shrink-0 text-xs font-bold uppercase tracking-widest text-slate-400">{label}</div>
+                    <div className="min-w-0 truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200" title={value}>{value}</div>
                   </div>
-                  <div className={`transition-colors duration-200 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Generated: {formatDisplayDateValue(selectedBooking.generated_at)} {format(new Date(selectedBooking.generated_at), 'h:mm a')}
-                  </div>
-                </div>
+                ))}
               </div>
 
               {selectedBooking.cancellation_status && selectedBooking.cancellation_status !== 'NONE' && (
@@ -825,6 +862,20 @@ const Tickets: React.FC = () => {
             </div>
 
               <div className="admin-modal-footer">
+                <Button
+                  variant="secondary"
+                  onClick={() => handleDownloadBooking(selectedBooking)}
+                >
+                  <ArrowDownTrayIcon className="h-4 w-4" />
+                  Download Ticket
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handlePrintBooking(selectedBooking)}
+                >
+                  <DocumentArrowDownIcon className="h-4 w-4" />
+                  Export PDF
+                </Button>
                 {canReviewCancellation(selectedBooking) ? (
                   <>
                     <Button
@@ -846,27 +897,17 @@ const Tickets: React.FC = () => {
                   <Button
                     onClick={() => {
                       handlePrintBooking(selectedBooking)
-                      setShowPreview(false)
-                      setSelectedBooking(null)
                     }}
                   >
                     <PrinterIcon className="h-4 w-4" />
-                    Print
+                    View Ticket
                   </Button>
                 )}
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setShowPreview(false)
-                    setSelectedBooking(null)
-                  }}
-                >
-                  Close
-                </Button>
               </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   )
 }

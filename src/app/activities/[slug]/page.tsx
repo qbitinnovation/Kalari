@@ -2,27 +2,22 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowRight, CalendarDays, CheckCircle2, Clock, MapPin, ShieldCheck, Star } from "lucide-react";
+import { useParams, useSearchParams } from "next/navigation";
+import { ArrowRight, CheckCircle2, Clock, MapPin, ShieldCheck, Star, Ticket } from "lucide-react";
 import PublicNavbar from "@/components/PublicNavbar";
 import { PublicFooter } from "@/components/PublicFooter";
 import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = any;
-type Show = any;
 
-const publicRecordId = (record: { id?: string; _id?: string }, fallback = "") =>
-  String(record?.id || record?._id || fallback);
-
-const publicShowBookingHref = (show: { id?: string; _id?: string }) => {
-  const showId = publicRecordId(show);
-  return showId ? `/book?show=${encodeURIComponent(showId)}` : "/book";
-};
+const publicActivityRouteId = (activity: { slug?: string; id?: string; _id?: string }) =>
+  String(activity.id || activity._id || activity.slug || "");
 
 export default function ActivityDetailPage() {
   const params = useParams<{ slug: string }>();
+  const searchParams = useSearchParams();
+  const selectedDate = searchParams.get("date") || "";
   const [activity, setActivity] = useState<Activity | null>(null);
-  const [shows, setShows] = useState<Show[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,15 +25,7 @@ export default function ActivityDetailPage() {
     fetch(`/api/activities/${params.slug}`)
       .then((response) => response.json())
       .then((payload) => {
-        if (payload?.data) {
-          setActivity(payload.data);
-          return fetch(`/api/shows?activityId=${publicRecordId(payload.data)}`);
-        }
-        return null;
-      })
-      .then((response) => response?.json())
-      .then((payload) => {
-        if (payload?.data) setShows(payload.data);
+        if (payload?.data) setActivity(payload.data);
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
@@ -48,7 +35,7 @@ export default function ActivityDetailPage() {
     return (
       <main className="min-h-screen bg-white text-[#10284a]">
         <PublicNavbar />
-        <div className="mx-auto max-w-[1530px] px-4 py-16">
+        <div className="mx-auto max-w-[1530px] px-4 pb-16 pt-28">
           <div className="h-[520px] animate-pulse rounded-lg bg-slate-100" />
         </div>
       </main>
@@ -59,7 +46,7 @@ export default function ActivityDetailPage() {
     return (
       <main className="min-h-screen bg-white text-[#10284a]">
         <PublicNavbar />
-        <div className="mx-auto max-w-4xl px-4 py-24 text-center">
+        <div className="mx-auto max-w-4xl px-4 pb-24 pt-32 text-center">
           <h1 className="text-4xl font-black">Activity not found</h1>
           <Link href="/activities" className="btn-gradient-primary mt-6 inline-flex rounded-full px-7 py-3 font-black text-white">View activities</Link>
         </div>
@@ -67,10 +54,16 @@ export default function ActivityDetailPage() {
     );
   }
 
+  const canBookActivity = activity.booking_status !== "PAUSED" && Number(activity.daily_capacity || 20) > 0;
+  const activityRouteId = publicActivityRouteId(activity);
+  const bookingHref = selectedDate
+    ? `/activities/${encodeURIComponent(activityRouteId)}/book?date=${encodeURIComponent(selectedDate)}`
+    : `/activities/${encodeURIComponent(activityRouteId)}/book`;
+
   return (
     <main className="min-h-screen bg-white text-[#10284a]">
       <PublicNavbar />
-      <section className="mx-auto grid max-w-[1530px] gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
+      <section className="mx-auto grid max-w-[1530px] gap-8 px-4 pb-10 pt-28 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:pt-32">
         <div>
           <img src={activity.image} alt={toDisplayTitle(activity.title)} className="h-[520px] w-full rounded-lg object-cover" />
         </div>
@@ -94,10 +87,16 @@ export default function ActivityDetailPage() {
                 <p className="text-sm font-bold text-slate-500">From</p>
                 <p className="text-4xl font-black">Rs. {activity.price}</p>
               </div>
-              <Link href={activity.category === "Kalari Booking" ? `/book?activity=${encodeURIComponent(publicRecordId(activity))}` : "/book"} className="btn-gradient-primary inline-flex items-center gap-2 rounded-full px-7 py-4 font-black text-white shadow-lg shadow-primary-900/15">
-                Check availability
-                <ArrowRight className="h-5 w-5" />
-              </Link>
+              {canBookActivity ? (
+                <Link href={bookingHref} className="btn-gradient-primary inline-flex items-center gap-2 rounded-full px-7 py-4 font-black text-white shadow-lg shadow-primary-900/15">
+                  Book Now
+                  <ArrowRight className="h-5 w-5" />
+                </Link>
+              ) : (
+                <span className="inline-flex rounded-full bg-slate-200 px-7 py-4 font-black text-slate-500">
+                  Booking unavailable
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -121,21 +120,16 @@ export default function ActivityDetailPage() {
             <ShieldCheck className="h-5 w-5 text-emerald-600" />
             Secure booking
           </div>
-          <h3 className="text-2xl font-black">Upcoming Kalari slots</h3>
-          <div className="mt-4 grid gap-3">
-            {shows.length ? shows.map((show, index) => (
-              <Link key={publicRecordId(show, `activity-show-${index}`)} href={publicShowBookingHref(show)} className="rounded-lg border border-slate-200 p-4 hover:border-primary-500">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-black">{toDisplayTitle(show.title)}</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-600"><CalendarDays className="mr-1 inline h-4 w-4" /> {show.date} at {show.time}</p>
-                  </div>
-                  <p className="font-black">Rs. {show.price}</p>
-                </div>
-              </Link>
-            )) : (
-              <p className="rounded-lg bg-slate-50 p-4 text-sm font-semibold text-slate-600">No upcoming slots are available right now.</p>
-            )}
+          <h3 className="text-2xl font-black">General admission</h3>
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <span className="inline-flex items-center gap-2 font-black"><Ticket className="h-5 w-5 text-primary-600" /> Daily limit</span>
+              <span className="font-black">{activity.daily_capacity || 20} tickets</span>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-4">
+              <span className="font-bold text-slate-500">Admission</span>
+              <span className="font-black">GENERAL</span>
+            </div>
           </div>
         </aside>
       </section>

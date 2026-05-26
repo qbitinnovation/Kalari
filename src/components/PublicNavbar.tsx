@@ -40,7 +40,7 @@ const PublicNavbar = () => {
   const [customer, setCustomer] = useState<CustomerSession | null>(null)
   const [accountOpen, setAccountOpen] = useState(false)
   const links = [
-    { href: '/schedule', label: 'Shows' },
+    { href: '/shows', label: 'Shows' },
     { href: '/activities', label: 'Activities' },
     { href: '/packages', label: 'Packages' },
     { href: '/gallery', label: 'Gallery' },

@@ -12,7 +12,7 @@ import { getAvailabilityLabel } from "@/lib/booking";
 import { formatDisplayDateValue, formatDisplayTimeValue } from "@/components/ui/date-utils";
 import { toDisplayTitle } from "@/lib/textFormat";
 
-type SearchType = "all" | "events" | "activities";
+type SearchType = "all" | "shows" | "activities";
 
 type Activity = {
   id: string;
@@ -25,6 +25,8 @@ type Activity = {
   price: number;
   image?: string;
   description?: string;
+  booking_status?: "ACTIVE" | "PAUSED";
+  daily_capacity?: number;
 };
 
 type Show = {
@@ -37,6 +39,7 @@ type Show = {
   type: "KALARI" | "EVENT";
   status: string;
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
+  available_count?: number;
   image?: string;
   description?: string;
   activity_id?: string;
@@ -48,6 +51,11 @@ const publicRecordId = (record: { id?: string; _id?: string }, fallback: string)
 const publicShowBookingHref = (show: { id?: string; _id?: string }) => {
   const showId = String(show.id || show._id || "");
   return showId ? `/book?show=${encodeURIComponent(showId)}` : "/book";
+};
+
+const publicActivityHref = (activity: { id?: string; _id?: string; slug?: string }) => {
+  const activityId = String(activity.id || activity._id || activity.slug || "");
+  return activityId ? `/activities/${encodeURIComponent(activityId)}` : "/activities";
 };
 
 export default function SearchPage() {
@@ -62,7 +70,7 @@ function SearchContent() {
   const params = useSearchParams();
   const initialType = (params.get("type") || "all") as SearchType;
   const [query, setQuery] = useState(params.get("q") || "");
-  const [type, setType] = useState<SearchType>(["all", "events", "activities"].includes(initialType) ? initialType : "all");
+  const [type, setType] = useState<SearchType>(["all", "shows", "activities"].includes(initialType) ? initialType : "all");
   const [date, setDate] = useState(params.get("date") || "");
   const [shows, setShows] = useState<Show[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -72,13 +80,21 @@ function SearchContent() {
     const load = async () => {
       setLoading(true);
       const [showsResponse, activitiesResponse] = await Promise.all([
-        fetch("/api/shows").catch(() => null),
+        fetch("/api/shows?upcoming=true").catch(() => null),
         fetch("/api/activities?status=ACTIVE").catch(() => null),
       ]);
       const showsPayload = await showsResponse?.json().catch(() => null);
       const activitiesPayload = await activitiesResponse?.json().catch(() => null);
-      setShows(showsPayload?.data || []);
-      setActivities(activitiesPayload?.data || []);
+      setShows((showsPayload?.data || []).filter((show: Show) =>
+        show.type === "KALARI" &&
+        show.status === "ACTIVE" &&
+        show.availability_status !== "SOLD_OUT" &&
+        Number(show.available_count ?? 1) > 0
+      ));
+      setActivities((activitiesPayload?.data || []).filter((activity: Activity) =>
+        activity.booking_status !== "PAUSED" &&
+        Number(activity.daily_capacity || 20) > 0
+      ));
       setLoading(false);
     };
 
@@ -101,7 +117,7 @@ function SearchContent() {
   }, [date, normalizedQuery, shows, type]);
 
   const filteredActivities = useMemo(() => {
-    if (type === "events") return [];
+    if (type === "shows") return [];
 
     return activities.filter((activity) => {
       const matchesQuery =
@@ -131,13 +147,13 @@ function SearchContent() {
         <div className="mx-auto max-w-[1530px] px-4 py-12 sm:px-6 lg:px-8">
           <p className="text-sm font-black uppercase tracking-widest text-primary-700">Search</p>
           <h1 className="mt-2 max-w-4xl text-4xl font-black leading-tight sm:text-5xl">
-            Find events and activities
+            Find shows and activities
           </h1>
           <form onSubmit={submitSearch} className="mt-8 grid gap-3 rounded-3xl border border-primary-100 bg-white p-3 shadow-xl md:grid-cols-[minmax(0,1fr)_190px_auto]">
             <div className="grid grid-cols-3 gap-1 rounded-xl bg-stone-100 p-1 md:col-span-3">
               {[
                 { value: "all", label: "All" },
-                { value: "events", label: "Events" },
+                { value: "shows", label: "Shows" },
                 { value: "activities", label: "Activities" },
               ].map((option) => (
                 <button
@@ -192,13 +208,13 @@ function SearchContent() {
         ) : (
           <div className="space-y-12">
             {filteredShows.length > 0 && (
-              <ResultSection title="Events" count={filteredShows.length}>
+              <ResultSection title="Shows" count={filteredShows.length}>
                 {filteredShows.map((show) => (
                   <Link key={publicRecordId(show, `search-show-${show.title}-${show.date}`)} href={publicShowBookingHref(show)} className="group overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
                     <img src={show.image || activityImages.kalari} alt={toDisplayTitle(show.title)} className="h-56 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
                     <div className="p-5">
                       <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-black uppercase tracking-widest text-primary-800">
-                        {show.type === "KALARI" ? "Kalari" : "Event"}
+                        Kalari Show
                       </span>
                       <h3 className="mt-3 text-2xl font-black">{toDisplayTitle(show.title)}</h3>
                       <p className="mt-2 line-clamp-2 min-h-11 text-sm font-medium leading-6 text-stone-600">{toDisplayTitle(show.description)}</p>
@@ -221,7 +237,7 @@ function SearchContent() {
             {filteredActivities.length > 0 && (
               <ResultSection title="Activities" count={filteredActivities.length}>
                 {filteredActivities.map((activity) => (
-                  <Link key={publicRecordId(activity, `search-activity-${activity.slug || activity.title}`)} href={`/activities/${activity.slug}`} className="group overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
+                  <Link key={publicRecordId(activity, `search-activity-${activity.slug || activity.title}`)} href={publicActivityHref(activity)} className="group overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
                     <img src={activity.image || activityImages.hero} alt={toDisplayTitle(activity.title)} className="h-56 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
                     <div className="p-5">
                       <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-black uppercase tracking-widest text-primary-800">{toDisplayTitle(activity.category)}</span>

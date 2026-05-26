@@ -15,6 +15,10 @@ export interface InputProps extends Omit<FieldProps, 'children'> {
   disabled?: boolean
   min?: number | string
   max?: number | string
+  maxLength?: number
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
+  pattern?: string
+  autoComplete?: string
   step?: number | string
   leftIcon?: LucideIcon
   inputClassName?: string
@@ -30,6 +34,10 @@ export function Input({
   disabled,
   min,
   max,
+  maxLength,
+  inputMode,
+  pattern,
+  autoComplete,
   step,
   leftIcon: LeftIcon,
   inputClassName,
@@ -56,6 +64,10 @@ export function Input({
           disabled={disabled}
           min={min}
           max={max}
+          maxLength={maxLength}
+          inputMode={inputMode}
+          pattern={pattern}
+          autoComplete={autoComplete}
           step={step}
           required={fieldProps.required}
           className={cn(

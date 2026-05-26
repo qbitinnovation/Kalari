@@ -8,6 +8,7 @@ export { TimePicker, type TimePickerProps } from './TimePicker'
 export { DateRangePicker, type DateRangePickerProps } from './DateRangePicker'
 export { Tabs, type TabsProps, type TabOption } from './Tabs'
 export { SearchInput, type SearchInputProps } from './SearchInput'
+export { Pagination, type PaginationProps } from './Pagination'
 export {
   AdminTable,
   AdminTableBody,

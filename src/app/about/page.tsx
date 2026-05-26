@@ -4,40 +4,23 @@ import React from 'react'
 import Link from 'next/link'
 import PublicNavbar from '@/components/PublicNavbar'
 import { PublicFooter } from '@/components/PublicFooter'
-import { motion } from 'framer-motion'
-import { Sparkles, Shield, MapPin, History, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { PublicHero } from '@/components/PublicHero'
+import { activityImages } from '@/lib/seedData'
+import { Sparkles, History, ArrowRight } from 'lucide-react'
 
 const About: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#f7f2e8] text-stone-950 flex flex-col">
       <PublicNavbar />
       
-      <main className="flex-1 pt-16">
-        {/* Hero Section */}
-        <section className="relative h-[60vh] flex items-center justify-center overflow-hidden bg-stone-950 text-white">
-          <img 
-            src="https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=2400&q=90" 
-            alt="Kalari Training" 
-            className="absolute inset-0 w-full h-full object-cover opacity-40 scale-105 animate-pulse-slow"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#f7f2e8] to-transparent" />
-          
-          <div className="relative z-10 text-center px-4 max-w-4xl mx-auto">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-400/20 border border-amber-400/30 text-amber-400 text-xs font-black uppercase tracking-widest mb-6 backdrop-blur-sm">
-                <Sparkles className="h-3 w-3" />
-                Our Ancient Roots
-              </div>
-              <h1 className="text-5xl md:text-7xl font-black tracking-tighter leading-none text-stone-950 mb-8">
-                3000 Years of <br/>
-                <span className="text-amber-600">Warrior Wisdom.</span>
-              </h1>
-              <p className="text-stone-700 text-lg md:text-xl font-medium max-w-2xl mx-auto leading-relaxed">
-                Step into the sacred circle where body, mind, and spirit become one. We preserve the authentic Kalaripayattu tradition in its purest form.
-              </p>
-            </motion.div>
-          </div>
-        </section>
+      <main className="flex-1">
+        <PublicHero
+          badge="Our ancient roots"
+          badgeIcon={<Sparkles className="h-3.5 w-3.5" />}
+          title={<>3000 Years of <span className="text-gradient-primary">Warrior Wisdom.</span></>}
+          description="Step into the sacred circle where body, mind, and spirit become one. We preserve the authentic Kalaripayattu tradition in its purest form."
+          image={activityImages.kalari}
+        />
 
         {/* Story Section */}
         <section className="py-24 px-4 sm:px-6 lg:px-8">

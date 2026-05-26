@@ -28,10 +28,19 @@ import {
   UserRound,
   Settings as SettingsIcon,
   ShieldCheck,
-  Map
+  Map,
+  Mail,
+  Globe2
 } from 'lucide-react'
 import { db, type Notification } from '@/lib/database'
 import { Button, Input } from '@/components/ui'
+import { formatDisplayDateValue, formatDisplayTimeValue, formatTimeValue } from '@/components/ui/date-utils'
+
+const formatNotificationTimestamp = (value?: string) => {
+  const date = value ? new Date(value) : null
+  if (!date || Number.isNaN(date.getTime())) return 'Date not set'
+  return `${formatDisplayDateValue(date)} • ${formatDisplayTimeValue(formatTimeValue(date.getHours(), date.getMinutes()))}`
+}
 
 const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, signOut } = useAuth()
@@ -56,6 +65,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const notificationWrapRef = React.useRef<HTMLDivElement>(null)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [passwordForm, setPasswordForm] = useState({
     newPassword: '',
@@ -67,14 +77,11 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     if (!user) return
-    const staffRoutes = ['/admin/shows', '/admin/activities', '/admin/booking', '/admin/tickets', '/admin/customers', '/admin/activity-bookings']
-    const agentRoutes = ['/admin/booking', '/admin/tickets']
+    const staffRoutes = ['/admin/shows', '/admin/activities', '/admin/booking', '/admin/tickets', '/admin/customers', '/admin/messages', '/admin/website-content']
     if (user.role === 'staff' && !staffRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
       router.replace('/admin/booking')
     }
-    if (user.role === 'agent' && !agentRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
-      router.replace('/admin/booking')
-    }
+    if (user.role === 'agent') router.replace('/admin/login')
   }, [pathname, router, user])
 
   useEffect(() => {
@@ -108,6 +115,17 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     const interval = window.setInterval(fetchNotifications, 60000)
     return () => window.clearInterval(interval)
   }, [fetchNotifications, user?.role])
+
+  useEffect(() => {
+    if (!showNotifications) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!notificationWrapRef.current?.contains(event.target as Node)) {
+        setShowNotifications(false)
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [showNotifications])
 
   const markNotificationRead = async (notification: Notification) => {
     if (!user?.id || (notification.read_by || []).includes(user.id)) return
@@ -181,17 +199,13 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const getNavigation = () => {
     const staffNavigation = [
       { name: 'Shows', href: '/admin/shows', icon: Film },
-      { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
-      { name: 'Activity Bookings', href: '/admin/activity-bookings', icon: Map },
+      { name: 'Book Tickets', href: '/admin/booking', icon: Ticket },
       { name: 'Customers', href: '/admin/customers', icon: User },
       { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
       { name: 'Activities', href: '/admin/activities', icon: Map },
+      { name: 'Messages', href: '/admin/messages', icon: Mail },
+      { name: 'Website Content', href: '/admin/website-content', icon: Globe2 },
     ]
-    const agentNavigation = [
-      { name: 'Book Seats', href: '/admin/booking', icon: Ticket },
-      { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
-    ]
-
     if (user?.role === 'admin') {
       return [
         { name: 'Dashboard', href: '/admin', icon: Home },
@@ -204,8 +218,6 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         { name: 'Staff Management', href: '/admin/staff', icon: ShieldCheck },
         { name: 'Settings', href: '/admin/settings', icon: SettingsIcon },
       ]
-    } else if (user?.role === 'agent') {
-       return agentNavigation
     } else {
       return staffNavigation
     }
@@ -217,11 +229,12 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const routeLabels: Record<string, string> = {
     '/admin': 'Dashboard',
     '/admin/shows': 'Shows',
-    '/admin/booking': 'Book Seats',
-    '/admin/activity-bookings': 'Activity Bookings',
+    '/admin/booking': 'Book Tickets',
     '/admin/customers': 'Customers',
     '/admin/tickets': 'Ticket History',
     '/admin/activities': 'Activities',
+    '/admin/messages': 'Messages',
+    '/admin/website-content': 'Website Content',
     '/admin/layouts': 'Seat Layouts',
     '/admin/customer-reports': 'Customer Reports',
     '/admin/reports': 'Reports',
@@ -458,7 +471,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
 
             <div className="flex items-center space-x-2 flex-shrink-0">
-              <div className="relative">
+              <div ref={notificationWrapRef} className="relative">
                 <button
                   onClick={() => {
                     setShowNotifications(!showNotifications)
@@ -508,7 +521,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                                 {unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />}
                               </div>
                               <p className="mt-1 text-xs font-semibold leading-5 opacity-70">{notification.message}</p>
-                              <p className="mt-2 text-[10px] font-bold opacity-40">{new Date(notification.created_at).toLocaleString()}</p>
+                              <p className="mt-2 text-[10px] font-bold opacity-40">{formatNotificationTimestamp(notification.created_at)}</p>
                             </button>
                           )
                         })}
@@ -603,7 +616,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <RoleProtectedRoute allowedRoles={['admin', 'staff', 'agent']}>
+    <RoleProtectedRoute allowedRoles={['admin', 'staff']}>
       <DashboardProvider>
         <AdminLayoutUI>
           {children}

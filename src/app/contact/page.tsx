@@ -3,43 +3,50 @@
 import React, { useState } from 'react'
 import PublicNavbar from '@/components/PublicNavbar'
 import { PublicFooter } from '@/components/PublicFooter'
-import { motion } from 'framer-motion'
 import { Mail, Phone, MapPin, Send, MessageSquare, Instagram, Facebook, Twitter, CheckCircle2 } from 'lucide-react'
 import { Input, Textarea } from '@/components/ui'
+import { PublicHero } from '@/components/PublicHero'
+import { activityImages } from '@/lib/seedData'
 
 const Contact: React.FC = () => {
   const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' })
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError('')
     setLoading(true)
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    setSubmitted(true)
-    setLoading(false)
+    try {
+      const response = await fetch('/api/contact-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to send message.')
+      setSubmitted(true)
+      setForm({ name: '', email: '', phone: '', message: '' })
+    } catch (err: any) {
+      setError(err.message || 'Unable to send message.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div className="min-h-screen bg-[#f7f2e8] flex flex-col">
       <PublicNavbar />
       
-      <main className="flex-1 pt-16">
-        {/* Hero */}
-        <section className="bg-stone-950 py-24 relative overflow-hidden text-center">
-          <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]" />
-          <div className="mx-auto max-w-7xl px-4 relative z-10">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[10px] font-black uppercase tracking-widest mb-6">
-                <MessageSquare className="h-3 w-3" />
-                Support & Inquiries
-              </div>
-              <h1 className="text-5xl md:text-7xl font-black tracking-tighter text-white mb-6">Let’s <span className="text-amber-400">Connect.</span></h1>
-              <p className="text-stone-400 text-lg max-w-xl mx-auto font-medium">Have questions about shows, training, or group bookings? Our team is here to help you experience the best of Kerala.</p>
-            </motion.div>
-          </div>
-        </section>
+      <main className="flex-1">
+        <PublicHero
+          badge="Support & inquiries"
+          badgeIcon={<MessageSquare className="h-3.5 w-3.5" />}
+          title={<>Let&apos;s <span className="text-gradient-primary">Connect.</span></>}
+          description="Have questions about shows, training, or group bookings? Our team is here to help you experience the best of Kerala."
+          image={activityImages.temple}
+        />
 
         <section className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
@@ -90,6 +97,11 @@ const Contact: React.FC = () => {
                     </div>
                   ) : (
                     <form onSubmit={handleSubmit} className="space-y-6">
+                      {error ? (
+                        <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                          {error}
+                        </div>
+                      ) : null}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <Input
                           variant="public"

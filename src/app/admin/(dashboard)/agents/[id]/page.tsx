@@ -1,347 +1,285 @@
 "use client";
 
-import React, { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { db, Booking, Show, Customer } from '@/lib/database'
-import { motion } from 'framer-motion'
-import { format } from 'date-fns'
-import { useDarkMode } from '@/hooks/useDarkMode'
-import { formatDisplayDateValue } from '@/components/ui/date-utils'
-import { getBookingReference, getRecordId } from '@/lib/booking'
-import { escapeReportHtml, openAdminReportPdf } from '@/lib/adminReportTemplate'
-import {
-  AdminTable,
-  AdminTableBody,
-  AdminTableCell,
-  AdminTableEmpty,
-  AdminTableHead,
-  AdminTableHeaderCell,
-  AdminTablePanel,
-  AdminTableRow,
-} from '@/components/ui'
-import { 
-  ArrowLeft, 
-  TrendingUp, 
-  Calendar, 
-  User, 
-  CreditCard, 
-  ChevronRight,
-  Filter,
-  Download,
-  Info
-} from 'lucide-react'
-
-interface Agent {
-  id: string
-  _id?: string
-  email: string
-  role: string
-  full_name: string
-  commission_percentage?: number
-  created_at: string
-  active: boolean
-}
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { ArrowLeft, Banknote, Calendar, CheckCircle2, CreditCard, Download, Info, Phone, User } from "lucide-react";
+import { db, type Agent, type Booking, type Show } from "@/lib/database";
+import { useDarkMode } from "@/hooks/useDarkMode";
+import { AdminTable, AdminTableBody, AdminTableCell, AdminTableEmpty, AdminTableHead, AdminTableHeaderCell, AdminTablePanel, AdminTableRow, Button } from "@/components/ui";
+import { formatDisplayDateValue } from "@/components/ui/date-utils";
+import { escapeReportHtml, openAdminReportPdf } from "@/lib/adminReportTemplate";
+import { getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
+import { getAgentContact, getAgentDisplayName, normalizePayoutFrequency } from "@/lib/agentCommission";
+import { toDisplayTitle } from "@/lib/textFormat";
 
 interface BookingWithDetails extends Booking {
-  show_details?: Show
+  show_details?: Show;
 }
 
-const AgentDetailPage: React.FC = () => {
-  const params = useParams()
-  const router = useRouter()
-  const agentId = params.id as string
-  const darkMode = useDarkMode()
-  
-  const [agent, setAgent] = useState<Agent | null>(null)
-  const [bookings, setBookings] = useState<BookingWithDetails[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+const rupees = (amount: number) => `Rs. ${Number(amount || 0).toLocaleString("en-IN")}`;
+
+export default function AgentDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const agentId = String(params.id || "");
+  const darkMode = useDarkMode();
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [bookings, setBookings] = useState<BookingWithDetails[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (agentId) {
-      fetchData()
-    }
-  }, [agentId])
+    if (agentId) fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
 
   const fetchData = async () => {
+    setLoading(true);
+    setError("");
     try {
-      setLoading(true)
-      
-      // 1. Fetch Agent
-      const { data: agentData, error: agentError } = await db
-        .from('users')
-        .select('*')
-        .eq('id', agentId)
-        .single()
+      let { data: agentData } = await db.from("agents").select("*").eq("id", agentId).single();
+      if (!agentData) {
+        const legacy = await db.from("users").select("*").eq("id", agentId).single();
+        agentData = legacy.data ? { ...legacy.data, name: legacy.data.full_name, phone: legacy.data.phone || legacy.data.email, payout_frequency: "MONTHLY" } : null;
+      }
+      if (!agentData) throw new Error("Agent not found.");
+      setAgent(agentData);
 
-      if (agentError) throw agentError
-      setAgent(agentData)
-
-      // 2. Fetch Bookings for this agent
       const { data: bookingData, error: bookingError } = await db
-        .from('bookings')
-        .select('*, customer:customers(*)')
-        .eq('agent_id', agentId)
-        .order('booking_time', { ascending: false })
+        .from("bookings")
+        .select("*, customer:customers(*)")
+        .eq("agent_id", agentId)
+        .order("booking_time", { ascending: false });
+      if (bookingError) throw bookingError;
 
-      if (bookingError) throw bookingError
-      
-      // 3. Fetch Show details for these bookings
-      const bookingsWithShows = await Promise.all((bookingData || []).map(async (booking) => {
-        const { data: showData } = await db
-          .from('shows')
-          .select('*')
-          .eq('id', booking.show_id)
-          .single()
-        
-        return {
-          ...booking,
-          show_details: showData
-        }
-      }))
-
-      setBookings(bookingsWithShows)
-    } catch (err: any) {
-      console.error('Error fetching agent details:', err)
-      setError('Failed to load agent details')
+      const rows = await Promise.all((bookingData || []).map(async (booking: BookingWithDetails) => {
+        const { data: showData } = await db.from("shows").select("*").eq("id", booking.show_id).single();
+        return { ...booking, show_details: showData };
+      }));
+      setBookings(rows);
+      setSelectedIds(rows.filter(isUnpaidCommission).map(getRecordId));
+    } catch (error: any) {
+      setError(error.message || "Failed to load agent details.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const totalBookings = bookings.length
-  const totalCommission = bookings.reduce((sum, b) => sum + (b.commission_amount || 0), 0)
-  
-  const getSeatCount = (seatCode: string) => {
+  const isUnpaidCommission = (booking: BookingWithDetails) =>
+    booking.status === "CONFIRMED" && Number(booking.commission_amount || 0) > 0 && booking.commission_status !== "PAID";
+
+  const totals = useMemo(() => {
+    const unpaid = bookings.filter(isUnpaidCommission).reduce((sum, booking) => sum + Number(booking.commission_amount || 0), 0);
+    const paid = bookings.filter((booking) => booking.commission_status === "PAID").reduce((sum, booking) => sum + Number(booking.commission_amount || 0), 0);
+    return { unpaid, paid, all: unpaid + paid };
+  }, [bookings]);
+
+  const selectedUnpaid = bookings.filter((booking) => selectedIds.includes(getRecordId(booking)) && isUnpaidCommission(booking));
+  const selectedAmount = selectedUnpaid.reduce((sum, booking) => sum + Number(booking.commission_amount || 0), 0);
+
+  const toggleSelection = (bookingId: string) => {
+    setSelectedIds((current) => current.includes(bookingId) ? current.filter((id) => id !== bookingId) : [...current, bookingId]);
+  };
+
+  const markSelectedPaid = async () => {
+    if (!selectedUnpaid.length) return;
+    setMarkingPaid(true);
+    setError("");
     try {
-      const seats = JSON.parse(seatCode)
-      return Array.isArray(seats) ? seats.length : 1
-    } catch {
-      return seatCode.includes(',') ? seatCode.split(',').length : 1
+      const { data: auth } = await db.auth.getUser();
+      const now = new Date().toISOString();
+      for (const booking of selectedUnpaid) {
+        const { error } = await db.from("bookings").update({
+          commission_status: "PAID",
+          commission_paid_at: now,
+          commission_paid_by: auth.user?.id || auth.user?.email || "admin",
+          updated_at: now,
+        }).eq("id", getRecordId(booking));
+        if (error) throw error;
+      }
+      await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "AGENT_PAYOUT_PAID",
+          module: "AGENTS",
+          title: "Agent commission marked paid",
+          message: `${agent ? getAgentDisplayName(agent) : "Agent"} commission of ${rupees(selectedAmount)} was marked paid.`,
+          severity: "SUCCESS",
+          entity_type: "agent",
+          entity_id: agentId,
+          action_url: `/admin/agents/${agentId}`,
+        }),
+      }).catch(() => null);
+      await fetchData();
+    } catch (error: any) {
+      setError(error.message || "Could not mark commission paid.");
+    } finally {
+      setMarkingPaid(false);
     }
-  }
+  };
 
-  const calculateTotalPrice = (booking: BookingWithDetails) => {
-    if (!booking.show_details) return 0
-    return booking.show_details.price * getSeatCount(booking.seat_code)
-  }
-  const displayedAgentId = getRecordId(agent)
-  const rupees = (amount: number) => `Rs. ${Number(amount || 0).toLocaleString('en-IN')}`
   const exportAgentReport = () => {
-    if (!agent) return
-
+    if (!agent) return;
     const bookingRows = bookings.map((booking) => `
       <tr>
-        <td>
-          <strong>${escapeReportHtml(getBookingReference(booking))}</strong>
-          <span class="muted">${escapeReportHtml(formatDisplayDateValue(booking.booking_time))}</span>
-        </td>
-        <td>
-          <strong>${escapeReportHtml(booking.show_details?.title || 'Unknown Show')}</strong>
-          <span class="muted">${escapeReportHtml(booking.show_details?.type || 'Show')}</span>
-        </td>
-        <td>${escapeReportHtml(booking.booked_by || booking.customer?.name || 'Customer')}</td>
-        <td class="nowrap">${escapeReportHtml(getSeatCount(booking.seat_code))}</td>
-        <td class="nowrap">${escapeReportHtml(rupees(calculateTotalPrice(booking)))}</td>
+        <td><strong>${escapeReportHtml(getBookingReference(booking))}</strong><span class="muted">${escapeReportHtml(formatDisplayDateValue(booking.booking_time))}</span></td>
+        <td><strong>${escapeReportHtml(booking.show_details?.title || "Unknown Show")}</strong><span class="muted">${escapeReportHtml(booking.show_details?.type || "Event")}</span></td>
+        <td>${escapeReportHtml(booking.booked_by || booking.customer?.name || "Customer")}</td>
+        <td class="nowrap">${escapeReportHtml(parseSeatCodes(booking.seat_code).length)}</td>
+        <td class="nowrap">${escapeReportHtml(rupees(booking.total_amount || 0))}</td>
+        <td class="nowrap">${escapeReportHtml(`${booking.agent_commission_percentage || 0}%`)}</td>
         <td class="nowrap">${escapeReportHtml(rupees(booking.commission_amount || 0))}</td>
-        <td>${escapeReportHtml(booking.status || 'CONFIRMED')}</td>
+        <td>${escapeReportHtml(booking.commission_status || "UNPAID")}</td>
       </tr>
-    `).join('')
+    `).join("");
 
     openAdminReportPdf({
-      title: 'Agent Performance Report',
-      subtitle: `Booking and commission summary for ${agent.full_name}.`,
+      title: "Agent Commission Report",
+      subtitle: `Offline payout summary for ${getAgentDisplayName(agent)}.`,
       generatedLabel: `Generated ${formatDisplayDateValue(new Date())}`,
       body: `
         <section class="metrics">
-          <article class="metric"><p class="label">Total Bookings</p><p class="value">${escapeReportHtml(totalBookings)}</p></article>
-          <article class="metric"><p class="label">Total Commission</p><p class="value">${escapeReportHtml(rupees(totalCommission))}</p></article>
-          <article class="metric"><p class="label">Commission Rate</p><p class="value">${escapeReportHtml(`${agent.commission_percentage || 0}%`)}</p></article>
-          <article class="metric"><p class="label">Agent Status</p><p class="value">${escapeReportHtml(agent.active ? 'Active' : 'Inactive')}</p></article>
+          <article class="metric"><p class="label">Unpaid</p><p class="value">${escapeReportHtml(rupees(totals.unpaid))}</p></article>
+          <article class="metric"><p class="label">Paid</p><p class="value">${escapeReportHtml(rupees(totals.paid))}</p></article>
+          <article class="metric"><p class="label">Bookings</p><p class="value">${escapeReportHtml(bookings.length)}</p></article>
+          <article class="metric"><p class="label">Payout Cycle</p><p class="value">${escapeReportHtml(toDisplayTitle(agent.payout_frequency))}</p></article>
         </section>
         <section class="panels">
           <article class="panel">
             <h2>Agent Details</h2>
             <div class="detail-grid">
-              <div class="detail"><p class="label">Agent Name</p><p class="value">${escapeReportHtml(agent.full_name)}</p></div>
-              <div class="detail"><p class="label">Agent ID</p><p class="value">${escapeReportHtml(displayedAgentId)}</p></div>
-              <div class="detail"><p class="label">Email</p><p class="value">${escapeReportHtml(agent.email)}</p></div>
-              <div class="detail"><p class="label">Joined Date</p><p class="value">${escapeReportHtml(formatDisplayDateValue(agent.created_at))}</p></div>
+              <div class="detail"><p class="label">Name</p><p class="value">${escapeReportHtml(getAgentDisplayName(agent))}</p></div>
+              <div class="detail"><p class="label">Phone</p><p class="value">${escapeReportHtml(getAgentContact(agent))}</p></div>
+              <div class="detail"><p class="label">Bank</p><p class="value">${escapeReportHtml(agent.bank_name || "Not added")}</p></div>
+              <div class="detail"><p class="label">Account</p><p class="value">${escapeReportHtml(agent.bank_account_number || "Not added")}</p></div>
             </div>
           </article>
           <article class="panel">
-            <h2>Bookings History</h2>
-            ${bookings.length ? `
-              <table>
-                <thead>
-                  <tr>
-                    <th>Booking Ref</th>
-                    <th>Show / Event</th>
-                    <th>Customer</th>
-                    <th>Tickets</th>
-                    <th>Amount</th>
-                    <th>Commission</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>${bookingRows}</tbody>
-              </table>
-            ` : '<div class="empty">No bookings found for this agent.</div>'}
+            <h2>Commission Bookings</h2>
+            ${bookings.length ? `<table><thead><tr><th>Booking</th><th>Event</th><th>Customer</th><th>Tickets</th><th>Amount</th><th>Rate</th><th>Commission</th><th>Status</th></tr></thead><tbody>${bookingRows}</tbody></table>` : '<div class="empty">No bookings found for this agent.</div>'}
           </article>
         </section>
       `,
-    })
-  }
+    });
+  };
 
-  if (loading) return <div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600"></div></div>
+  if (loading) return <div className="flex h-screen items-center justify-center"><div className="h-12 w-12 animate-spin rounded-full border-b-2 border-amber-600" /></div>;
 
   if (error || !agent) return (
     <div className="p-8 text-center">
-      <div className="bg-red-50 text-red-600 p-4 rounded-xl inline-block mb-4">
-        <Info className="inline mr-2" /> {error || 'Agent not found'}
+      <div className="mb-4 inline-block rounded-xl bg-red-50 p-4 text-red-600">
+        <Info className="mr-2 inline" /> {error || "Agent not found"}
       </div>
-      <br />
-      <button onClick={() => router.back()} className="text-amber-600 font-bold flex items-center justify-center gap-2 mx-auto">
-        <ArrowLeft className="w-4 h-4" /> Go Back
+      <button onClick={() => router.back()} className="mx-auto flex items-center justify-center gap-2 font-bold text-amber-600">
+        <ArrowLeft className="h-4 w-4" /> Go Back
       </button>
     </div>
-  )
+  );
 
   return (
-    <div className={`min-h-screen p-4 sm:p-8 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-      <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* Header */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className={`min-h-screen p-4 sm:p-8 ${darkMode ? "text-slate-100" : "text-slate-900"}`}>
+      <div className="mx-auto max-w-7xl space-y-8">
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => router.back()} 
-              className={`p-3 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
-            >
-              <ArrowLeft className="w-5 h-5" />
+            <button onClick={() => router.back()} className={`rounded-2xl border p-3 transition-all ${darkMode ? "border-slate-800 bg-slate-900 hover:bg-slate-800" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+              <ArrowLeft className="h-5 w-5" />
             </button>
             <div>
-              <h1 className="text-3xl font-black tracking-tight">{agent.full_name}</h1>
-              <p className="opacity-50 font-bold text-xs uppercase tracking-widest flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${agent.active ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                {agent.active ? 'Active Agent' : 'Inactive Agent'} • Agent ID: {displayedAgentId.slice(0, 8)}
+              <h1 className="text-3xl font-black tracking-tight">{toDisplayTitle(getAgentDisplayName(agent))}</h1>
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest opacity-50">
+                <span className={`h-2 w-2 rounded-full ${agent.active !== false ? "bg-emerald-500" : "bg-red-500"}`} />
+                {agent.active !== false ? "Active Agent" : "Inactive Agent"} • {toDisplayTitle(normalizePayoutFrequency(agent.payout_frequency))} payout
               </p>
             </div>
           </div>
-          <div className="flex gap-2 w-full md:w-auto">
-            <button onClick={exportAgentReport} className={`flex-1 md:flex-none px-6 py-3 rounded-2xl border font-bold text-sm transition-all flex items-center justify-center gap-2 ${darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
-              <Download className="w-4 h-4" /> Export PDF
-            </button>
+          <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+            <Button variant="secondary" onClick={exportAgentReport}><Download className="h-4 w-4" /> Export PDF</Button>
+            <Button onClick={markSelectedPaid} disabled={markingPaid || selectedUnpaid.length === 0}><CheckCircle2 className="h-4 w-4" /> Mark Selected Paid ({rupees(selectedAmount)})</Button>
           </div>
         </header>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard 
-            label="Total Commission" 
-            value={`₹${totalCommission.toLocaleString()}`} 
-            icon={<CreditCard className="w-6 h-6 text-emerald-500" />} 
-            darkMode={darkMode}
-          />
-          <StatCard 
-            label="Total Bookings" 
-            value={totalBookings.toString()} 
-            icon={<Calendar className="w-6 h-6 text-blue-500" />} 
-            darkMode={darkMode}
-          />
-          <StatCard 
-            label="Commission Rate" 
-            value={`${agent.commission_percentage}%`} 
-            icon={<TrendingUp className="w-6 h-6 text-amber-500" />} 
-            darkMode={darkMode}
-          />
-          <StatCard 
-            label="Joined Date" 
-            value={formatDisplayDateValue(agent.created_at)} 
-            icon={<User className="w-6 h-6 text-purple-500" />} 
-            darkMode={darkMode}
-          />
+        {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Unpaid Commission" value={rupees(totals.unpaid)} icon={<CreditCard className="h-6 w-6 text-amber-500" />} darkMode={darkMode} />
+          <StatCard label="Paid Commission" value={rupees(totals.paid)} icon={<CheckCircle2 className="h-6 w-6 text-emerald-500" />} darkMode={darkMode} />
+          <StatCard label="Total Bookings" value={String(bookings.length)} icon={<Calendar className="h-6 w-6 text-blue-500" />} darkMode={darkMode} />
+          <StatCard label="Payout Cycle" value={toDisplayTitle(agent.payout_frequency)} icon={<User className="h-6 w-6 text-purple-500" />} darkMode={darkMode} />
         </div>
 
-        <AdminTablePanel
-          title="Agent Bookings History"
-          actions={
-            <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              <Filter className="h-4 w-4" />
-              Sort: Newest
-            </div>
-          }
-        >
-            <AdminTable>
-              <AdminTableHead>
-                <tr>
-                  <AdminTableHeaderCell>Date & Show</AdminTableHeaderCell>
-                  <AdminTableHeaderCell>Customer</AdminTableHeaderCell>
-                  <AdminTableHeaderCell>Seats</AdminTableHeaderCell>
-                  <AdminTableHeaderCell>Booking Amount</AdminTableHeaderCell>
-                  <AdminTableHeaderCell>Commission</AdminTableHeaderCell>
-                  <AdminTableHeaderCell align="right">Action</AdminTableHeaderCell>
-                </tr>
-              </AdminTableHead>
-              <AdminTableBody>
-                {bookings.map((booking) => (
-                  <AdminTableRow key={getRecordId(booking)} className="group">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <InfoCard title="Contact" rows={[["Phone", getAgentContact(agent)], ["Agent ID", getRecordId(agent)], ["Joined", formatDisplayDateValue(agent.created_at)]]} />
+          <InfoCard title="Bank Details" rows={[["Account Name", agent.bank_account_name || "Not added"], ["Account Number", agent.bank_account_number || "Not added"], ["IFSC", agent.bank_ifsc || "Not added"], ["Bank", agent.bank_name || "Not added"]]} />
+        </div>
+
+        <AdminTablePanel title="Commission Bookings">
+          <AdminTable>
+            <AdminTableHead>
+              <tr>
+                <AdminTableHeaderCell>Select</AdminTableHeaderCell>
+                <AdminTableHeaderCell>Booking / Event</AdminTableHeaderCell>
+                <AdminTableHeaderCell>Customer</AdminTableHeaderCell>
+                <AdminTableHeaderCell>Tickets</AdminTableHeaderCell>
+                <AdminTableHeaderCell>Rate</AdminTableHeaderCell>
+                <AdminTableHeaderCell>Commission</AdminTableHeaderCell>
+                <AdminTableHeaderCell>Status</AdminTableHeaderCell>
+              </tr>
+            </AdminTableHead>
+            <AdminTableBody>
+              {bookings.map((booking) => {
+                const bookingId = getRecordId(booking);
+                const unpaid = isUnpaidCommission(booking);
+                return (
+                  <AdminTableRow key={bookingId}>
                     <AdminTableCell>
-                      <div className="font-bold text-sm leading-tight mb-1">{booking.show_details?.title || 'Unknown Show'}</div>
-                      <div className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
-                        {formatDisplayDateValue(booking.booking_time)} - {format(new Date(booking.booking_time), 'hh:mm a')}
-                      </div>
+                      <input type="checkbox" disabled={!unpaid} checked={selectedIds.includes(bookingId)} onChange={() => toggleSelection(bookingId)} />
                     </AdminTableCell>
                     <AdminTableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] font-black">
-                          {booking.booked_by.charAt(0)}
-                        </div>
-                        <div className="font-bold text-sm">{booking.booked_by}</div>
-                      </div>
+                      <div className="font-bold text-sm">{booking.show_details?.title || "Unknown Event"}</div>
+                      <div className="mt-1 text-[10px] font-black uppercase tracking-widest opacity-40">{getBookingReference(booking)} • {formatDisplayDateValue(booking.booking_time)}</div>
                     </AdminTableCell>
+                    <AdminTableCell>{booking.booked_by || booking.customer?.name || "Customer"}</AdminTableCell>
+                    <AdminTableCell>{parseSeatCodes(booking.seat_code).length}</AdminTableCell>
+                    <AdminTableCell>{booking.agent_commission_percentage || 0}%</AdminTableCell>
+                    <AdminTableCell><span className="font-black text-emerald-600">{rupees(booking.commission_amount || 0)}</span></AdminTableCell>
                     <AdminTableCell>
-                      <span className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-black">
-                        {getSeatCount(booking.seat_code)} SEATS
+                      <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase ${booking.commission_status === "PAID" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {booking.commission_status || "UNPAID"}
                       </span>
                     </AdminTableCell>
-                    <AdminTableCell>
-                      <div className="font-bold text-sm text-slate-500">₹{calculateTotalPrice(booking).toLocaleString()}</div>
-                    </AdminTableCell>
-                    <AdminTableCell>
-                      <div className="font-black text-sm text-emerald-500">₹{booking.commission_amount?.toLocaleString() || 0}</div>
-                    </AdminTableCell>
-                    <AdminTableCell align="right">
-                      <button 
-                        onClick={() => router.push(`/admin/tickets?booking=${getRecordId(booking)}`)}
-                        className="p-2 rounded-lg opacity-20 group-hover:opacity-100 hover:bg-amber-100 hover:text-amber-600 transition-all"
-                      >
-                        <ChevronRight className="w-5 h-5" />
-                      </button>
-                    </AdminTableCell>
                   </AdminTableRow>
-                ))}
-                {bookings.length === 0 && (
-                  <AdminTableEmpty colSpan={6}>No bookings found for this agent.</AdminTableEmpty>
-                )}
-              </AdminTableBody>
-            </AdminTable>
+                );
+              })}
+              {bookings.length === 0 && <AdminTableEmpty colSpan={7}>No bookings found for this agent.</AdminTableEmpty>}
+            </AdminTableBody>
+          </AdminTable>
         </AdminTablePanel>
       </div>
     </div>
-  )
+  );
 }
 
-const StatCard = ({ label, value, icon, darkMode }: { label: string, value: string, icon: React.ReactNode, darkMode: boolean }) => (
-  <div className={`p-8 rounded-[2.5rem] border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xl shadow-slate-100/50 hover:shadow-2xl hover:shadow-slate-200'}`}>
-    <div className="flex justify-between items-start mb-4">
-      <div className={`p-3 rounded-2xl ${darkMode ? 'bg-slate-800' : 'bg-slate-50'}`}>
-        {icon}
-      </div>
+const InfoCard = ({ title, rows }: { title: string; rows: [string, string][] }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <h2 className="mb-4 flex items-center gap-2 font-black"><Banknote className="h-5 w-5 text-amber-600" /> {title}</h2>
+    <div className="grid gap-3">
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex justify-between gap-4 text-sm">
+          <span className="font-bold opacity-50">{label}</span>
+          <span className="text-right font-black">{value}</span>
+        </div>
+      ))}
     </div>
-    <div className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1">{label}</div>
+  </div>
+);
+
+const StatCard = ({ label, value, icon, darkMode }: { label: string; value: string; icon: React.ReactNode; darkMode: boolean }) => (
+  <div className={`rounded-2xl border p-6 transition-all ${darkMode ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white shadow-sm"}`}>
+    <div className={`mb-4 inline-flex rounded-2xl p-3 ${darkMode ? "bg-slate-800" : "bg-slate-50"}`}>{icon}</div>
+    <div className="mb-1 text-[10px] font-black uppercase tracking-widest opacity-40">{label}</div>
     <div className="text-2xl font-black tracking-tight">{value}</div>
   </div>
-)
-
-export default AgentDetailPage
+);

@@ -221,7 +221,6 @@ const StaffPage: React.FC = () => {
                 >
                   <option value="staff">Staff Member</option>
                   <option value="admin">Administrator</option>
-                  <option value="agent">Agent</option>
                 </select>
               </div>
               

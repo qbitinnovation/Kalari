@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { getSeedData } from "./seedData";
-import { AGENT_DEFAULT_COMMISSION_PERCENTAGE, countBookedSeats, getAvailabilityStatus, getShowCapacity, isShowBookableAt } from "./booking";
+import { countBookedSeats, getAvailabilityStatus, getShowCapacity, isShowBookableAt } from "./booking";
 
 type Store = Record<string, any[]>;
 
@@ -14,7 +14,9 @@ const initialStore = (): Store => {
     users: [
       { id: "user-admin", email: "admin@kalari.local", password: "admin123", role: "admin", full_name: "Kalari Admin", active: true, created_at: now },
       { id: "user-staff", email: "staff@kalari.local", password: "staff123", role: "staff", full_name: "Kalari Staff", active: true, created_at: now },
-      { id: "user-agent", email: "agent@kalari.local", password: "admin123", role: "agent", full_name: "Booking Agent", commission_percentage: AGENT_DEFAULT_COMMISSION_PERCENTAGE, active: true, created_at: now },
+    ],
+    agents: [
+      { id: "agent-local", name: "Booking Agent", phone: "+91 98765 43210", payout_frequency: "MONTHLY", active: true, created_at: now, updated_at: now },
     ],
     activities: seed.activities,
     shows: seed.shows,
@@ -71,22 +73,28 @@ const attachRelations = (store: Store, collection: string, rowsOrRow: any) => {
 
   if (collection === "bookings") {
     const showsById = new Map((store.shows || []).map((show) => [String(recordId(show)), show]));
+    const activitiesById = new Map((store.activities || []).map((activity) => [String(recordId(activity)), activity]));
     const customersById = new Map((store.customers || []).map((customer) => [String(recordId(customer)), customer]));
     rows.forEach((booking) => {
       if (booking.show_id) booking.show = showsById.get(String(booking.show_id)) || null;
+      if (booking.activity_id) booking.activity = activitiesById.get(String(booking.activity_id)) || null;
       if (booking.customer_id) booking.customer = customersById.get(String(booking.customer_id)) || null;
     });
   }
 
   if (collection === "tickets") {
     const showsById = new Map((store.shows || []).map((show) => [String(recordId(show)), show]));
+    const activitiesById = new Map((store.activities || []).map((activity) => [String(recordId(activity)), activity]));
     const bookingsById = new Map((store.bookings || []).map((booking) => [String(recordId(booking)), booking]));
     const customersById = new Map((store.customers || []).map((customer) => [String(recordId(customer)), customer]));
     rows.forEach((ticket) => {
       if (ticket.show_id) ticket.show = showsById.get(String(ticket.show_id)) || null;
+      if (ticket.activity_id) ticket.activity = activitiesById.get(String(ticket.activity_id)) || null;
       if (ticket.booking_id) {
         const booking = bookingsById.get(String(ticket.booking_id)) || null;
         if (booking?.customer_id) booking.customer = customersById.get(String(booking.customer_id)) || null;
+        if (booking?.activity_id) booking.activity = activitiesById.get(String(booking.activity_id)) || null;
+        if (booking?.show_id) booking.show = showsById.get(String(booking.show_id)) || null;
         ticket.booking = booking;
         ticket.booked_by = booking?.booked_by || ticket.generated_by;
       }
@@ -129,7 +137,10 @@ export const localQuery = async ({
   if (operation === "insert") {
     if (collection === "bookings") {
       const showById = new Map((store.shows || []).map((show) => [String(recordId(show)), show]));
-      const closedShow = (insertPayload || []).find((booking: any) => !isShowBookableAt(showById.get(String(booking.show_id))));
+      const closedShow = (insertPayload || []).find((booking: any) => {
+        if (booking.booking_type === "ACTIVITY" || booking.activity_id) return false;
+        return !isShowBookableAt(showById.get(String(booking.show_id)));
+      });
       if (closedShow) throw new Error("Booking is closed because this show time has passed.");
     }
     const rows = (insertPayload || []).map((row: any) => ({

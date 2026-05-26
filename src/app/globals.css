@@ -268,6 +268,8 @@ h1, h2, h3, h4, h5, h6 {
 .admin-portal input.ui-field:not([type="checkbox"]):not([type="radio"])::placeholder,
 .admin-portal textarea.ui-field::placeholder {
   color: #94a3b8;
+  font-size: 0.875rem;
+  font-weight: 400;
   opacity: 1;
 }
 
@@ -301,6 +303,8 @@ h1, h2, h3, h4, h5, h6 {
 .dark .admin-portal input.ui-field:not([type="checkbox"]):not([type="radio"])::placeholder,
 .dark .admin-portal textarea.ui-field::placeholder {
   color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 400;
 }
 
 .dark .admin-portal select option {
@@ -331,6 +335,13 @@ h1, h2, h3, h4, h5, h6 {
   background: rgba(15, 23, 42, 0.68);
   padding: 1rem;
   backdrop-filter: blur(8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+body:has(.admin-modal-overlay) {
+  overflow: hidden;
 }
 
 .admin-modal-card {
@@ -410,6 +421,8 @@ h1, h2, h3, h4, h5, h6 {
 .admin-modal-body {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 1.5rem;
 }
 
@@ -455,22 +468,52 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Primary button — Kalari orange gradient */
+/* Primary orange system - Kalari brand gradient */
+:root {
+  --kalari-primary-from: #e1a233;
+  --kalari-primary-mid: #d6841e;
+  --kalari-primary-to: #ba6618;
+  --kalari-primary-hover-from: #d6841e;
+  --kalari-primary-hover-mid: #ba6618;
+  --kalari-primary-hover-to: #9a4c17;
+  --kalari-primary-gradient: linear-gradient(135deg, var(--kalari-primary-from) 0%, var(--kalari-primary-mid) 45%, var(--kalari-primary-to) 100%);
+  --kalari-primary-gradient-hover: linear-gradient(135deg, var(--kalari-primary-hover-from) 0%, var(--kalari-primary-hover-mid) 50%, var(--kalari-primary-hover-to) 100%);
+}
+
+.text-gradient-primary {
+  background: var(--kalari-primary-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-badge-primary {
+  border-color: rgba(225, 162, 51, 0.38);
+  background: linear-gradient(135deg, rgba(225, 162, 51, 0.16), rgba(186, 102, 24, 0.12));
+  color: #ffd47a;
+  box-shadow: inset 0 0 0 1px rgba(255, 212, 122, 0.08), 0 10px 30px rgba(0, 0, 0, 0.16);
+}
+
+.hero-badge-primary svg {
+  color: #f4b84a;
+}
+
 .btn-gradient-primary {
-  background: linear-gradient(135deg, #e1a233 0%, #d6841e 45%, #ba6618 100%);
+  background: var(--kalari-primary-gradient);
 }
 
 .btn-gradient-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #d6841e 0%, #ba6618 50%, #9a4c17 100%);
+  background: var(--kalari-primary-gradient-hover);
 }
 
 .admin-modal-button-primary {
-  background: linear-gradient(135deg, #e1a233 0%, #d6841e 45%, #ba6618 100%);
+  background: var(--kalari-primary-gradient);
   color: #ffffff;
   box-shadow: 0 4px 14px rgba(186, 102, 24, 0.28);
 }
 
 .admin-modal-button-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #d6841e 0%, #ba6618 50%, #9a4c17 100%);
+  background: var(--kalari-primary-gradient-hover);
 }
 
 .admin-modal-label {
@@ -498,6 +541,8 @@ h1, h2, h3, h4, h5, h6 {
 
 .admin-modal-field::placeholder {
   color: #94a3b8;
+  font-size: 0.875rem;
+  font-weight: 400;
 }
 
 .admin-modal-field:focus {

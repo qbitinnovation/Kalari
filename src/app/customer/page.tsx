@@ -24,14 +24,26 @@ type BookingRow = Booking & {
     price: number;
     type?: string;
   };
+  activity?: {
+    title: string;
+    price?: number;
+    booking_price?: number;
+  };
 };
 
 const SESSION_KEY = "kalari_customer";
 
 const showDateTime = (booking: BookingRow) => {
+  if (booking.booking_type === "ACTIVITY" || booking.activity_id) {
+    return booking.booking_date ? new Date(`${booking.booking_date}T23:59`) : new Date(booking.booking_time);
+  }
   if (!booking.show?.date || !booking.show?.time) return new Date(booking.booking_time);
   return new Date(`${booking.show.date}T${booking.show.time}`);
 };
+
+const bookingTitle = (booking: BookingRow) => booking.show?.title || booking.activity?.title || "Booking";
+const bookingDate = (booking: BookingRow) => booking.booking_type === "ACTIVITY" || booking.activity_id ? booking.booking_date : booking.show?.date;
+const bookingTime = (booking: BookingRow) => booking.booking_type === "ACTIVITY" || booking.activity_id ? "" : booking.show?.time;
 
 export default function CustomerDashboardPage() {
   const router = useRouter();
@@ -60,7 +72,7 @@ export default function CustomerDashboardPage() {
     setLoading(true);
     const { data, error } = await db
       .from("bookings")
-      .select("*, show:shows(*)")
+      .select("*, show:shows(*), activity:activities(*)")
       .eq("customer_id", customerId)
       .order("booking_time", { ascending: false });
 
@@ -158,11 +170,11 @@ const BookingSection = ({ title, bookings, emptyText }: { title: string; booking
                     {seats.length} ticket(s)
                   </div>
                   {cancellationPending && <div className="mb-3 rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">Cancellation requested</div>}
-                  <h3 className="text-xl font-black">{booking.show?.title || "Booking"}</h3>
+                  <h3 className="text-xl font-black">{bookingTitle(booking)}</h3>
                   <p className="mt-2 inline-flex items-center gap-2 text-sm font-bold text-stone-500">
                     <CalendarDays className="h-4 w-4" />
-                    {formatDisplayDateValue(booking.show?.date, "Date unavailable")}
-                    {booking.show?.time ? ` at ${formatDisplayTimeValue(booking.show.time)}` : ""}
+                    {formatDisplayDateValue(bookingDate(booking), "Date unavailable")}
+                    {bookingTime(booking) ? ` at ${formatDisplayTimeValue(bookingTime(booking))}` : ""}
                   </p>
                 </div>
                 <ArrowRight className="mt-2 h-5 w-5 text-stone-300 transition group-hover:text-amber-600" />

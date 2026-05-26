@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from 'react'
-import { db, Show, Customer } from '@/lib/database'
+import React, { useState, useEffect, useMemo } from 'react'
+import { db, Show, Customer, type Agent, type Activity } from '@/lib/database'
 import { motion } from 'framer-motion'
-import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logBookingCreation } from '@/utils/activityLogger'
 import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, isActiveBookingReservation, isShowBookableAt, parseSeatCodes } from '@/lib/booking'
+import { calculateEventCommission, getAgentDisplayName, getCommissionPeriodKey } from '@/lib/agentCommission'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
@@ -16,9 +16,23 @@ import {
   sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
-import { CalendarDays, Clock, IndianRupee, Ticket, X } from 'lucide-react'
-import { Button, DatePicker, Input } from '@/components/ui'
-import { formatDisplayDateValue } from '@/components/ui/date-utils'
+import { CalendarDays, Clock, IndianRupee, Printer, Ticket, X } from 'lucide-react'
+import {
+  AdminTable,
+  AdminTableBody,
+  AdminTableCell,
+  AdminTableEmpty,
+  AdminTableHead,
+  AdminTableHeaderCell,
+  AdminTablePanel,
+  AdminTableRow,
+  Button,
+  DatePicker,
+  Input,
+  SearchInput,
+  Select,
+} from '@/components/ui'
+import { formatDisplayDateValue, todayDateValue } from '@/components/ui/date-utils'
 import { toDisplayTitle } from '@/lib/textFormat'
 
 interface SeatData {
@@ -31,27 +45,29 @@ interface SeatData {
   seatName?: string
 }
 
-interface Agent {
-  id: string
-  _id?: string
-  email: string
-  role: string
-  full_name: string
-  commission_percentage?: number
-  active: boolean
-}
-
 const recordId = getRecordId
 
+type BookingMode = 'SHOW' | 'ACTIVITY'
+type BookingTypeFilter = 'ALL' | BookingMode
+
 const Booking: React.FC = () => {
+  const [bookingMode, setBookingMode] = useState<BookingMode>('SHOW')
+  const [bookingTypeFilter, setBookingTypeFilter] = useState<BookingTypeFilter>('ALL')
+  const [bookingSearch, setBookingSearch] = useState('')
   const [shows, setShows] = useState<Show[]>([])
   const [allShows, setAllShows] = useState<Show[]>([])
   const [selectedShow, setSelectedShow] = useState<Show | null>(null)
+  const [activities, setActivities] = useState<Activity[]>([])
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null)
+  const [activityTicketCount, setActivityTicketCount] = useState(1)
+  const [activityRemaining, setActivityRemaining] = useState<number | null>(null)
+  const [activityAvailability, setActivityAvailability] = useState<Record<string, number>>({})
   const [seats, setSeats] = useState<SeatData[]>([])
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
   const [eventTicketCount, setEventTicketCount] = useState(1)
   const [loading, setLoading] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const [bookingDetailOpen, setBookingDetailOpen] = useState(false)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [bookingResult, setBookingResult] = useState<any>(null)
   const [selectedDate, setSelectedDate] = useState<string>('')
@@ -64,6 +80,7 @@ const Booking: React.FC = () => {
 
   useEffect(() => {
     fetchActiveShows()
+    fetchActivities()
     fetchAgents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -78,6 +95,7 @@ const Booking: React.FC = () => {
   }, [selectedShow])
 
   useEffect(() => {
+    if (bookingMode !== 'SHOW') return
     if (selectedDate) {
       const filteredShows = allShows.filter(show => show.date === selectedDate)
       setShows(filteredShows)
@@ -88,6 +106,35 @@ const Booking: React.FC = () => {
       setSelectedShow(null)
     }
   }, [selectedDate, allShows, selectedShow])
+
+  useEffect(() => {
+    if (bookingMode !== 'ACTIVITY' || !selectedActivity) return
+    fetchActivityAvailability(selectedActivity)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingMode, selectedActivity, selectedDate])
+
+  useEffect(() => {
+    if (activities.length === 0) {
+      setActivityAvailability({})
+      return
+    }
+
+    const loadAvailability = async () => {
+      const date = selectedDate || todayDateValue()
+      const entries = await Promise.all(activities.map(async (activity) => {
+        try {
+          const response = await fetch(`/api/activity-bookings?activityId=${encodeURIComponent(recordId(activity))}&date=${encodeURIComponent(date)}`)
+          const payload = await response.json().catch(() => ({}))
+          return [recordId(activity), Number(payload?.data?.remaining ?? activity.daily_capacity ?? 20)] as const
+        } catch {
+          return [recordId(activity), Number(activity.daily_capacity || 20)] as const
+        }
+      }))
+      setActivityAvailability(Object.fromEntries(entries))
+    }
+
+    loadAvailability()
+  }, [activities, selectedDate])
 
   const getAvailableDates = () => {
     const uniqueDates = new Set(allShows.map(show => show.date))
@@ -102,7 +149,7 @@ const Booking: React.FC = () => {
           *,
           layout:layouts(*)
         `)
-        .in('status', ['ACTIVE', 'SHOW_STARTED'])
+        .in('status', ['ACTIVE'])
         .gte('date', new Date().toISOString().split('T')[0])
         .order('date')
 
@@ -110,7 +157,11 @@ const Booking: React.FC = () => {
       
       const updatedShows = await checkAndUpdateShowStatuses(data || [])
       const activeShows = updatedShows.filter(show =>
-        (show.status === 'ACTIVE' || show.status === 'SHOW_STARTED') && isShowBookableAt(show)
+        show.type !== 'EVENT' &&
+        show.status === 'ACTIVE' &&
+        isShowBookableAt(show) &&
+        show.availability_status !== 'SOLD_OUT' &&
+        Number(show.available_count ?? 1) > 0
       )
       
       setAllShows(activeShows)
@@ -123,11 +174,10 @@ const Booking: React.FC = () => {
   const fetchAgents = async () => {
     try {
       const { data, error } = await db
-        .from('users')
+        .from('agents')
         .select('*')
-        .eq('role', 'agent')
         .eq('active', true)
-        .order('full_name')
+        .order('name')
       if (error) throw error
       setAgents(data || [])
     } catch (error) {
@@ -252,11 +302,36 @@ const Booking: React.FC = () => {
     setSelectedSeats(prev => prev.includes(seatId) ? prev.filter(id => id !== seatId) : [...prev, seatId])
   }
 
-  const getTicketQuantity = () => selectedShow?.type === 'EVENT' ? eventTicketCount : selectedSeats.length
+  const getTicketQuantity = () => {
+    if (bookingMode === 'ACTIVITY') return activityTicketCount
+    return selectedShow?.type === 'EVENT' ? eventTicketCount : selectedSeats.length
+  }
 
-  const getTotalAmount = () => (selectedShow?.price || 100) * getTicketQuantity()
+  const getTotalAmount = () => {
+    if (bookingMode === 'ACTIVITY') return Number(selectedActivity?.booking_price || selectedActivity?.price || 0) * getTicketQuantity()
+    return (selectedShow?.price || 100) * getTicketQuantity()
+  }
+
+  const getSelectedTitle = () =>
+    bookingMode === 'ACTIVITY' ? selectedActivity?.title : selectedShow?.title
 
   const handleContinueBooking = () => {
+    if (bookingMode === 'ACTIVITY') {
+      if (!selectedActivity || getTicketQuantity() === 0) return
+      if (selectedActivity.booking_status === 'PAUSED') {
+        alert('This activity booking is paused.')
+        return
+      }
+      const remaining = activityRemaining ?? Number(selectedActivity.daily_capacity || 20)
+      if (activityTicketCount > remaining) {
+        alert(`Only ${remaining} tickets left for this activity date.`)
+        return
+      }
+      setCheckoutCustomerError('')
+      setBookingDetailOpen(false)
+      setShowCustomerModal(true)
+      return
+    }
     if (!selectedShow || getTicketQuantity() === 0) return
     if (!isShowBookableAt(selectedShow)) {
       alert('Booking is closed because this show time has passed.')
@@ -265,14 +340,66 @@ const Booking: React.FC = () => {
       return
     }
     setCheckoutCustomerError('')
+    setBookingDetailOpen(false)
     setShowCustomerModal(true)
   }
 
-  const findOrCreateCheckoutCustomer = async () => {
-    const phone = checkoutCustomerPhone.trim()
-    if (!/^[0-9+\s-]{10,}$/.test(phone)) {
-      throw new Error('Enter a valid customer mobile number.')
+  const fetchActivities = async () => {
+    try {
+      const { data, error } = await db
+        .from('activities')
+        .select('*')
+        .eq('status', 'ACTIVE')
+        .order('title')
+      if (error) throw error
+      setActivities((data || []).filter((activity: Activity) =>
+        activity.booking_status !== 'PAUSED' &&
+        Number(activity.daily_capacity || 20) > 0
+      ))
+    } catch (error) {
+      console.error('Error fetching activities:', error)
     }
+  }
+
+  const fetchActivityAvailability = async (activity: Activity) => {
+    try {
+      const date = selectedDate || todayDateValue()
+      const response = await fetch(`/api/activity-bookings?activityId=${encodeURIComponent(recordId(activity))}&date=${encodeURIComponent(date)}`)
+      const payload = await response.json().catch(() => ({}))
+      setActivityRemaining(Number(payload?.data?.remaining ?? activity.daily_capacity ?? 20))
+    } catch {
+      setActivityRemaining(Number(activity.daily_capacity || 20))
+    }
+  }
+
+  const getIndianMobileDigits = (value: string) => {
+    const digits = value.replace(/\D/g, '')
+    return digits.startsWith('91') && digits.length > 10 ? digits.slice(2) : digits
+  }
+
+  const isValidIndianMobile = (value: string) => /^[6-9]\d{9}$/.test(getIndianMobileDigits(value))
+
+  const normalizeIndianMobile = (value: string) => {
+    const mobile = getIndianMobileDigits(value)
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      throw new Error('Enter a valid 10-digit Indian mobile number with +91 code.')
+    }
+    return `+91${mobile}`
+  }
+
+  const handleCheckoutPhoneChange = (value: string) => {
+    const digits = value.replace(/\D/g, '')
+    if (value.length > 20 || digits.length > 12) return
+    setCheckoutCustomerPhone(value)
+    setCheckoutCustomerError('')
+  }
+
+  const phoneValidationError = checkoutCustomerPhone.trim() && !isValidIndianMobile(checkoutCustomerPhone)
+    ? 'Enter a valid 10-digit Indian mobile number with +91 code.'
+    : ''
+
+  const findOrCreateCheckoutCustomer = async () => {
+    const phone = normalizeIndianMobile(checkoutCustomerPhone)
 
     const { data: existingCustomers, error: existingError } = await db.from('customers').select('*').eq('phone', phone)
     if (existingError) throw new Error(existingError.message || 'Could not check customer mobile number.')
@@ -321,7 +448,8 @@ const Booking: React.FC = () => {
 
       const linkedAgentId = selectedShow.type === 'EVENT' ? selectedShow.agent_id || '' : ''
       const agent = agents.find(a => recordId(a) === linkedAgentId)
-      const commissionAmount = agent ? (getTotalAmount() * (agent.commission_percentage || 0)) / 100 : 0
+      const commissionPercentage = linkedAgentId ? Number((selectedShow as any).agent_commission_percentage || 0) : 0
+      const commissionAmount = linkedAgentId ? calculateEventCommission(getTotalAmount(), commissionPercentage) : 0
       const bookingReference = createBookingReference()
       const seatCodesToSave = selectedShow.type === 'EVENT'
         ? Array.from({ length: eventTicketCount }).map(() => 'GENERAL')
@@ -335,7 +463,10 @@ const Booking: React.FC = () => {
         booked_by: customer.name,
         customer_id: recordId(customer),
         agent_id: linkedAgentId || null,
+        agent_commission_percentage: commissionPercentage,
         commission_amount: commissionAmount,
+        commission_status: commissionAmount > 0 ? 'UNPAID' : 'PAID',
+        commission_period_key: commissionAmount > 0 ? getCommissionPeriodKey(new Date(), agent?.payout_frequency || 'DAILY') : null,
         payment_method: 'COUNTER',
         payment_status: 'PAID',
         total_amount: getTotalAmount(),
@@ -375,7 +506,7 @@ const Booking: React.FC = () => {
 
       const { data: { user } } = await db.auth.getUser()
       await logBookingCreation(bookingId, selectedShow.title, user?.email || 'unknown', {
-        booking_reference: getBookingReference(booking), seat_codes: seatCodesToSave, total_price: getTotalAmount(), agent_name: agent?.full_name
+        booking_reference: getBookingReference(booking), seat_codes: seatCodesToSave, total_price: getTotalAmount(), agent_name: agent ? getAgentDisplayName(agent) : undefined
       })
 
       setBookingResult({ bookings, tickets, success: true, totalAmount: getTotalAmount() })
@@ -389,10 +520,54 @@ const Booking: React.FC = () => {
     } catch (error: any) { alert(`Error: ${error.message}`) } finally { setLoading(false) }
   }
 
+  const handleBookActivity = async () => {
+    if (!selectedActivity || activityTicketCount < 1) return
+    const phone = normalizeIndianMobile(checkoutCustomerPhone)
+    const date = selectedDate || todayDateValue()
+    const response = await fetch('/api/activity-bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        activityId: recordId(selectedActivity),
+        date,
+        ticketCount: activityTicketCount,
+        paymentMethod: 'COUNTER',
+        customer: {
+          name: checkoutCustomerName.trim() || 'Walk-in Customer',
+          phone,
+        },
+      }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.error || 'Could not complete activity booking.')
+
+    const booking = payload.data?.booking
+    const tickets = payload.data?.tickets || []
+    const bookingId = recordId(booking)
+    const { data: { user } } = await db.auth.getUser()
+    await logBookingCreation(bookingId, selectedActivity.title, user?.email || 'unknown', {
+      booking_reference: getBookingReference(booking),
+      seat_codes: Array.from({ length: activityTicketCount }).map(() => 'GENERAL'),
+      total_price: getTotalAmount(),
+    })
+
+    setBookingResult({ bookings: [booking], tickets, success: true, totalAmount: getTotalAmount() })
+    setShowConfirmation(true)
+    setShowCustomerModal(false)
+    setCheckoutCustomerPhone('')
+    setCheckoutCustomerName('')
+    setActivityTicketCount(1)
+    fetchActivityAvailability(selectedActivity)
+  }
+
   const handleCustomerCheckout = async () => {
     setSubmittingCustomer(true)
     setCheckoutCustomerError('')
     try {
+      if (bookingMode === 'ACTIVITY') {
+        await handleBookActivity()
+        return
+      }
       const customer = await findOrCreateCheckoutCustomer()
       await handleBookSeats(customer)
     } catch (error: any) {
@@ -400,6 +575,57 @@ const Booking: React.FC = () => {
     } finally {
       setSubmittingCustomer(false)
     }
+  }
+
+  const handlePrintBookingResult = () => {
+    const booking = bookingResult?.bookings?.[0]
+    if (!booking) return
+    const reference = getBookingReference(booking)
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(reference)}`
+    const title = toDisplayTitle(getSelectedTitle() || booking.activity?.title || booking.show?.title || 'Booking')
+    const admission = bookingMode === 'ACTIVITY' || selectedShow?.type === 'EVENT' ? 'GENERAL' : 'Reserved seats'
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Ticket - ${reference}</title>
+          <style>
+            body { margin: 0; padding: 24px; font-family: Arial, sans-serif; color: #111827; background: #fff; }
+            .ticket { max-width: 520px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 18px; padding: 28px; }
+            .brand { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #d97706; text-transform: uppercase; }
+            h1 { margin: 10px 0 4px; font-size: 28px; }
+            .muted { color: #6b7280; font-weight: 700; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 24px 0; }
+            .box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px; }
+            .label { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #9ca3af; text-transform: uppercase; }
+            .value { margin-top: 6px; font-size: 18px; font-weight: 900; }
+            .qr { text-align: center; margin-top: 20px; }
+            .ref { margin-top: 14px; text-align: center; font-family: monospace; font-weight: 900; color: #b45309; }
+            @media print { body { padding: 10px; } }
+          </style>
+        </head>
+        <body>
+          <div class="ticket">
+            <div class="brand">Kovalam Kalari</div>
+            <h1>${title}</h1>
+            <div class="muted">Counter booking ticket</div>
+            <div class="grid">
+              <div class="box"><div class="label">Admission</div><div class="value">${admission}</div></div>
+              <div class="box"><div class="label">Tickets</div><div class="value">${bookingResult?.tickets?.length || getTicketQuantity()}</div></div>
+              <div class="box"><div class="label">Total</div><div class="value">Rs. ${bookingResult?.totalAmount ?? getTotalAmount()}</div></div>
+              <div class="box"><div class="label">Payment</div><div class="value">Paid</div></div>
+            </div>
+            <div class="qr"><img src="${qrCodeUrl}" width="140" height="140" alt="QR Code" /></div>
+            <div class="ref">${reference}</div>
+          </div>
+          <script>window.onload = () => setTimeout(() => window.print(), 500)</script>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
   }
 
   const getRowsForSection = (section: string) =>
@@ -532,102 +758,272 @@ const Booking: React.FC = () => {
     )
   }
 
+  const bookingRows = useMemo(() => {
+    const showRows = shows.map((show) => ({
+      id: recordId(show),
+      type: 'SHOW' as const,
+      name: show.title,
+      date: show.date,
+      timeLabel: show.time || 'Time not set',
+      availability: Number(show.available_count ?? 0),
+      price: Number(show.price || 0),
+      source: show,
+    }))
+    const activityRows = activities.map((activity) => {
+      const activityId = recordId(activity)
+      return {
+        id: activityId,
+        type: 'ACTIVITY' as const,
+        name: activity.title,
+        date: selectedDate || todayDateValue(),
+        timeLabel: 'General admission',
+        availability: Number(activityAvailability[activityId] ?? activity.daily_capacity ?? 20),
+        price: Number(activity.booking_price || activity.price || 0),
+        source: activity,
+      }
+    })
+    const query = bookingSearch.trim().toLowerCase()
+    return [...showRows, ...activityRows]
+      .filter((row) => bookingTypeFilter === 'ALL' || row.type === bookingTypeFilter)
+      .filter((row) => !selectedDate || row.type === 'ACTIVITY' || row.date === selectedDate)
+      .filter((row) => !query || `${row.name} ${row.type} ${row.date} ${row.timeLabel}`.toLowerCase().includes(query))
+      .sort((left, right) => {
+        const byDate = String(left.date).localeCompare(String(right.date))
+        if (byDate !== 0) return byDate
+        if (left.type !== right.type) return left.type === 'SHOW' ? -1 : 1
+        return left.name.localeCompare(right.name)
+      })
+  }, [activities, activityAvailability, bookingSearch, bookingTypeFilter, selectedDate, shows])
+
+  const selectBookingRow = (row: typeof bookingRows[number]) => {
+    if (row.type === 'SHOW') {
+      setBookingMode('SHOW')
+      setSelectedShow(row.source as Show)
+      setSelectedActivity(null)
+      setActivityTicketCount(1)
+      setActivityRemaining(null)
+      setBookingDetailOpen(true)
+      return
+    }
+    const activity = row.source as Activity
+    setBookingMode('ACTIVITY')
+    setSelectedActivity(activity)
+    setSelectedShow(null)
+    setSelectedSeats([])
+    setEventTicketCount(1)
+    setActivityTicketCount(1)
+    setActivityRemaining(Number(activityAvailability[recordId(activity)] ?? activity.daily_capacity ?? 20))
+    if (!selectedDate) setSelectedDate(todayDateValue())
+    setBookingDetailOpen(true)
+  }
+
+  const selectedName = selectedActivity?.title || selectedShow?.title
+
   return (
     <div className={darkMode ? 'text-slate-100' : 'text-slate-900'}>
       <div className="w-full space-y-6">
-        <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h1 className="mb-2 text-4xl font-black tracking-tight">Book Tickets</h1>
-            <p className="max-w-2xl font-medium opacity-60">Manage Kalari seat bookings and general event tickets</p>
-          </div>
-          <div className="w-full max-w-sm lg:pt-1">
-            <label className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest opacity-50">
-              <CalendarDays className="h-4 w-4" />
-              Select Date
-            </label>
+        <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <h1 className="text-4xl font-black tracking-tight">Book Tickets</h1>
+          <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto xl:items-center">
+            <SearchInput
+              value={bookingSearch}
+              onChange={setBookingSearch}
+              placeholder="Search shows or activities..."
+              containerClassName="w-full sm:min-w-[320px] xl:w-96"
+            />
+            <Select
+              value={bookingTypeFilter}
+              onChange={(value) => setBookingTypeFilter(value as BookingTypeFilter)}
+              options={[
+                { value: 'ALL', label: 'All Types' },
+                { value: 'SHOW', label: 'Shows' },
+                { value: 'ACTIVITY', label: 'Activities' },
+              ]}
+              className="w-full sm:w-48"
+            />
             <DatePicker
               value={selectedDate}
               onChange={setSelectedDate}
-              placeholder="Select date"
-              triggerClassName={`font-bold ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}
+              placeholder="All dates"
+              minDate={bookingTypeFilter === 'ACTIVITY' ? todayDateValue() : undefined}
+              presets={[
+                { label: 'Today', value: 'today' },
+                { label: 'Clear', value: 'clear' },
+              ]}
+              className="w-full sm:w-48"
             />
           </div>
         </header>
 
         <section className="space-y-6">
-          {/* Left Column: Show Selection */}
-          <div className="space-y-6">
-            <div className={`hidden rounded-2xl border p-4 shadow-sm sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-              <h2 className="mb-5 flex items-center gap-2 text-xl font-bold">
-                <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
-                Select Date
-              </h2>
-              <DatePicker
-                value={selectedDate}
-                onChange={setSelectedDate}
-                placeholder="Select date"
-                triggerClassName={`font-bold ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-              />
-              <div className="mt-4 flex flex-wrap gap-2">
-                {getAvailableDates().map(d => (
-                   <button key={d} onClick={() => setSelectedDate(d)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${selectedDate === d ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : darkMode ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'}`}>
-                     {formatDisplayDateValue(d)}
-                   </button>
-                ))}
-              </div>
-            </div>
+          <AdminTablePanel>
+            <AdminTable>
+              <AdminTableHead>
+                <tr>
+                  <AdminTableHeaderCell>Name</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Type</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Date</AdminTableHeaderCell>
+                  <AdminTableHeaderCell>Time / Admission</AdminTableHeaderCell>
+                  <AdminTableHeaderCell align="center">Available</AdminTableHeaderCell>
+                  <AdminTableHeaderCell align="right">Price</AdminTableHeaderCell>
+                  <AdminTableHeaderCell align="right">Action</AdminTableHeaderCell>
+                </tr>
+              </AdminTableHead>
+              <AdminTableBody>
+                {bookingRows.length === 0 && (
+                  <AdminTableEmpty colSpan={7}>
+                    No bookable shows or activities match the current filters.
+                  </AdminTableEmpty>
+                )}
+                {bookingRows.map((row) => {
+                  const active = row.type === 'SHOW'
+                    ? selectedShow && recordId(selectedShow) === row.id
+                    : selectedActivity && recordId(selectedActivity) === row.id
+                  return (
+                    <AdminTableRow
+                      key={`${row.type}-${row.id}`}
+                      className={active ? 'bg-amber-50/80 hover:bg-amber-50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30' : undefined}
+                    >
+                      <AdminTableCell>
+                        <div className="font-black text-slate-950 dark:text-slate-100">{toDisplayTitle(row.name)}</div>
+                        <div className="mt-1 text-xs font-bold text-slate-400">
+                          {row.type === 'SHOW' ? 'Kalari seat booking' : 'Daily activity booking'}
+                        </div>
+                      </AdminTableCell>
+                      <AdminTableCell>
+                        <span className={`rounded-full px-3 py-1 text-xs font-black ${row.type === 'SHOW' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+                          {row.type === 'SHOW' ? 'Show' : 'Activity'}
+                        </span>
+                      </AdminTableCell>
+                      <AdminTableCell>{formatDisplayDateValue(row.date)}</AdminTableCell>
+                      <AdminTableCell>{row.timeLabel}</AdminTableCell>
+                      <AdminTableCell align="center">
+                        <span className="font-black">{Math.max(0, row.availability)}</span>
+                      </AdminTableCell>
+                      <AdminTableCell align="right">
+                        <span className="font-black text-amber-600">Rs. {row.price}</span>
+                      </AdminTableCell>
+                      <AdminTableCell align="right">
+                        <Button size="sm" variant="primary" onClick={() => selectBookingRow(row)}>
+                          Book Now
+                        </Button>
+                      </AdminTableCell>
+                    </AdminTableRow>
+                  )
+                })}
+              </AdminTableBody>
+            </AdminTable>
+          </AdminTablePanel>
 
-            <div className={`rounded-2xl border p-4 shadow-sm sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-              <h2 className="mb-5 flex items-center gap-2 text-xl font-bold">
-                <span className="w-2 h-6 bg-amber-500 rounded-full"></span>
-                Available Shows
-              </h2>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {shows.map(show => (
-                  <button
-                    key={recordId(show)}
-                    onClick={() => setSelectedShow(show)}
-                    className={`flex min-h-[190px] w-full flex-col rounded-2xl border-2 p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg ${selectedShow && recordId(selectedShow) === recordId(show) ? 'border-amber-500 bg-amber-500/10 shadow-lg shadow-amber-500/10' : darkMode ? 'border-slate-800 bg-slate-800/50 hover:border-slate-700' : 'border-slate-100 bg-slate-50 hover:border-amber-200'}`}
-                  >
-                    <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${show.type === 'EVENT' ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
-                        {show.type === 'EVENT' ? 'Event Tickets' : 'Kalari Seating'}
-                      </span>
-                      {selectedShow && recordId(selectedShow) === recordId(show) && (
-                        <span className="rounded-full bg-amber-500 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white">Selected</span>
-                      )}
-                    </div>
-                    <div className="text-lg font-black leading-tight">{toDisplayTitle(show.title)}</div>
-                    <div className="mt-4 space-y-2 text-sm font-bold opacity-60">
-                      <div className="flex items-center gap-2">
-                        <CalendarDays className="h-4 w-4 shrink-0" />
-                        {formatDisplayDateValue(show.date)}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 shrink-0" />
-                        {show.time}
-                      </div>
-                    </div>
-                    <div className="mt-auto flex items-end justify-between gap-3 pt-5">
-                      <span className="flex items-center gap-1 text-xl font-black text-amber-600">
-                        <IndianRupee className="h-4 w-4" />
-                        {show.price}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs font-black uppercase tracking-widest opacity-50">
-                        <Ticket className="h-4 w-4" />
-                        {show.type === 'EVENT' ? `Limit ${show.capacity || 0}` : 'Seats'}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-                {shows.length === 0 && <div className="py-12 text-center opacity-30 font-bold">No shows found</div>}
-              </div>
-            </div>
-          </div>
+        </section>
 
-          {/* Right Column: Seating Plan */}
-          <div className="lg:col-span-2">
-            {selectedShow ? (
+        {bookingDetailOpen && (selectedActivity || selectedShow) && (
+          <div
+            className="admin-modal-overlay"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setBookingDetailOpen(false)
+            }}
+          >
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="admin-modal-panel admin-modal-card w-full"
+              style={{ maxWidth: 'min(1320px, 96vw)' }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="admin-modal-header">
+                <div>
+                  <h2 className="admin-modal-title">Book Tickets</h2>
+                  <p className="admin-modal-subtitle">
+                    {bookingMode === 'ACTIVITY'
+                      ? `${formatDisplayDateValue(selectedDate || todayDateValue())} - General admission`
+                      : selectedShow ? `${formatDisplayDateValue(selectedShow.date)} - ${selectedShow.time || 'Time not set'}` : 'Select tickets'}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setBookingDetailOpen(false)} className="admin-modal-close" aria-label="Close booking details">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="admin-modal-body">
+            {bookingMode === 'ACTIVITY' && selectedActivity ? (
+              <div className={`grid gap-6 rounded-2xl border p-5 shadow-sm transition-all lg:grid-cols-[minmax(0,1fr)_360px] sm:p-7 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="space-y-6">
+                  <div className="flex flex-col gap-3">
+                    <span className="w-fit rounded-full bg-amber-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                      Activity tickets
+                    </span>
+                    <div>
+                      <h2 className="text-3xl font-black tracking-tight">{toDisplayTitle(selectedActivity.title)}</h2>
+                      <p className="mt-2 text-sm font-bold uppercase tracking-widest text-slate-400">
+                        {formatDisplayDateValue(selectedDate || todayDateValue())} - General admission
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className={`rounded-2xl border p-6 ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h3 className="text-2xl font-black">General admission</h3>
+                        <p className="mt-1 text-sm font-bold opacity-50">Choose how many tickets to issue for this activity date.</p>
+                      </div>
+                      <div className="w-fit rounded-xl bg-white px-4 py-3 text-sm font-black text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-800">
+                        {activityRemaining ?? selectedActivity.daily_capacity ?? 20} remaining
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-4">
+                      <button onClick={() => setActivityTicketCount(Math.max(1, activityTicketCount - 1))} className={`flex h-14 w-14 items-center justify-center rounded-2xl border text-2xl font-black transition-colors ${darkMode ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>-</button>
+                      <div className={`flex min-w-36 flex-col items-center rounded-2xl border px-8 py-4 ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                        <div className="text-4xl font-black text-amber-600">{activityTicketCount}</div>
+                        <div className="text-[11px] font-black uppercase tracking-widest opacity-40">Tickets</div>
+                      </div>
+                      <button
+                        onClick={() => setActivityTicketCount(Math.min(activityRemaining ?? Number(selectedActivity.daily_capacity || 20), activityTicketCount + 1))}
+                        className={`flex h-14 w-14 items-center justify-center rounded-2xl border text-2xl font-black transition-colors ${darkMode ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-white hover:bg-slate-100'}`}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <div className="mt-6 grid gap-3 text-sm font-bold text-slate-500 sm:grid-cols-2 dark:text-slate-400">
+                      <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">Admission: GENERAL</div>
+                      <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">Daily limit: {selectedActivity.daily_capacity || 20}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <aside className={`flex flex-col justify-between rounded-2xl border p-6 ${darkMode ? 'border-slate-800 bg-slate-950/50' : 'border-slate-200 bg-slate-50'}`}>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Booking summary</p>
+                    <div className="mt-5 space-y-4 text-sm font-bold">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-slate-500 dark:text-slate-400">Ticket type</span>
+                        <span>GENERAL</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-slate-500 dark:text-slate-400">Quantity</span>
+                        <span>{getTicketQuantity()}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-slate-500 dark:text-slate-400">Price</span>
+                        <span>Rs. {Number(selectedActivity.booking_price || selectedActivity.price || 0)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-8 border-t border-slate-200 pt-6 dark:border-slate-800">
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-400">Total amount</p>
+                        <p className="mt-1 text-4xl font-black text-amber-600">Rs. {getTotalAmount()}</p>
+                      </div>
+                    </div>
+                    <Button onClick={handleContinueBooking} size="lg" className="mt-6 w-full uppercase tracking-widest">
+                      Checkout ({getTicketQuantity()})
+                    </Button>
+                  </div>
+                </aside>
+              </div>
+            ) : bookingMode === 'SHOW' && selectedShow ? (
               <div className={`rounded-2xl border p-4 shadow-sm transition-all sm:p-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                   <div>
@@ -638,7 +1034,7 @@ const Booking: React.FC = () => {
                     <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-4">
                       <div className="text-right">
                         <div className="text-[10px] font-black uppercase tracking-widest opacity-40">Total Amount</div>
-                        <div className="text-2xl font-black text-amber-600">₹{getTotalAmount()}</div>
+                        <div className="text-2xl font-black text-amber-600">Rs. {getTotalAmount()}</div>
                       </div>
                       <Button onClick={handleContinueBooking} size="lg" className="uppercase tracking-widest">
                         Checkout ({getTicketQuantity()})
@@ -669,14 +1065,11 @@ const Booking: React.FC = () => {
                   ) : renderRectangularSeatMap()}
                 </div>
               </div>
-            ) : (
-              <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 opacity-20 dark:border-slate-800">
-                <svg className="w-20 h-20 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
-                <div className="text-xl font-black uppercase tracking-widest">Select a show to begin</div>
+            ) : null}
               </div>
-            )}
+            </motion.div>
           </div>
-        </section>
+        )}
       </div>
 
       {/* Customer Modal */}
@@ -715,13 +1108,14 @@ const Booking: React.FC = () => {
                        label="Mobile Number"
                        type="tel"
                        value={checkoutCustomerPhone}
-                       onChange={(phone) => {
-                         setCheckoutCustomerPhone(phone)
-                         setCheckoutCustomerError('')
-                       }}
+                       onChange={handleCheckoutPhoneChange}
                        placeholder="+91 98765 43210"
+                       inputMode="tel"
+                       autoComplete="tel"
+                       maxLength={20}
+                       pattern="^(\\+91[\\s-]?)?[6-9][0-9]{9}$"
                        required
-                       error={checkoutCustomerError}
+                       error={checkoutCustomerError || phoneValidationError}
                      />
                      <Input
                        label="Customer Name (optional for new mobile)"
@@ -737,9 +1131,10 @@ const Booking: React.FC = () => {
                  <div className={`p-6 rounded-3xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                    <div className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4">Summary</div>
                    <div className="space-y-2">
-                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Show:</span><span className="text-right">{toDisplayTitle(selectedShow?.title)}</span></div>
+                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">{bookingMode === 'ACTIVITY' ? 'Activity:' : 'Show:'}</span><span className="text-right">{toDisplayTitle(getSelectedTitle())}</span></div>
+                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Admission:</span><span>{bookingMode === 'ACTIVITY' || selectedShow?.type === 'EVENT' ? 'GENERAL' : 'Seats'}</span></div>
                      <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Tickets:</span><span>{getTicketQuantity()}</span></div>
-                     <div className="flex justify-between font-bold"><span>Total:</span><span>₹{getTotalAmount()}</span></div>
+                     <div className="flex justify-between font-bold"><span>Total:</span><span>Rs. {getTotalAmount()}</span></div>
                    </div>
                  </div>
 
@@ -751,7 +1146,7 @@ const Booking: React.FC = () => {
                </Button>
                <Button
                  onClick={handleCustomerCheckout}
-                 disabled={!checkoutCustomerPhone.trim() || loading || submittingCustomer}
+                 disabled={!checkoutCustomerPhone.trim() || !!phoneValidationError || loading || submittingCustomer}
                >
                  {loading || submittingCustomer ? 'Processing...' : 'Confirm & Generate Tickets'}
                </Button>
@@ -763,22 +1158,60 @@ const Booking: React.FC = () => {
       {/* Confirmation Modal */}
       {showConfirmation && (
         <div className="admin-modal-overlay">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0" />
-          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="admin-modal-panel admin-modal-card text-center">
-             <div className="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
-               <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-             </div>
-             <h2 className="text-3xl font-black mb-2">Booking Success!</h2>
-             <p className="opacity-60 font-medium mb-10">Tickets have been generated and recorded in the system.</p>
-             {bookingResult?.bookings?.[0] && (
-               <div className="mb-8 rounded-2xl bg-amber-50 px-4 py-3 font-mono text-sm font-black text-amber-800">
-                 {getBookingReference(bookingResult.bookings[0])}
-               </div>
-             )}
-             <div className="admin-modal-footer">
-               <Button variant="secondary" onClick={() => setShowConfirmation(false)}>New Booking</Button>
-               <Button onClick={() => window.location.href = '/admin/tickets'}>View All Tickets</Button>
-             </div>
+          <motion.div
+            initial={{ y: 24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="admin-modal-panel admin-modal-card w-full"
+            style={{ maxWidth: 'min(760px, 94vw)' }}
+          >
+            <div className="admin-modal-header">
+              <div className="flex items-center gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="admin-modal-title">Booking confirmed</h2>
+                  <p className="admin-modal-subtitle">Tickets are generated and saved in ticket history.</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setShowConfirmation(false)} className="admin-modal-close" aria-label="Close confirmation">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="admin-modal-body">
+              <div className={`rounded-2xl border p-6 ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Booking reference</p>
+                    <p className="mt-2 break-all font-mono text-2xl font-black text-amber-600">
+                      {bookingResult?.bookings?.[0] ? getBookingReference(bookingResult.bookings[0]) : 'Confirmed'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Total amount</p>
+                    <p className="mt-2 text-2xl font-black">Rs. {bookingResult?.totalAmount ?? getTotalAmount()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Tickets</p>
+                    <p className="mt-2 text-lg font-black">{bookingResult?.tickets?.length || getTicketQuantity()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Admission</p>
+                    <p className="mt-2 text-lg font-black">{bookingMode === 'ACTIVITY' || selectedShow?.type === 'EVENT' ? 'GENERAL' : 'Reserved seats'}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="admin-modal-footer">
+              <Button variant="secondary" onClick={() => setShowConfirmation(false)}>New Booking</Button>
+              <Button variant="secondary" onClick={handlePrintBookingResult}>
+                <Printer className="h-4 w-4" />
+                Print Ticket
+              </Button>
+              <Button onClick={() => window.location.href = '/admin/tickets'}>View Tickets</Button>
+            </div>
           </motion.div>
         </div>
       )}

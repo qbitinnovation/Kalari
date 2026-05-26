@@ -157,6 +157,7 @@ export interface Show {
   capacity?: number;
   layout_id?: string;
   agent_id?: string;
+  agent_commission_percentage?: number;
   active: boolean;
   status?: "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE";
   booked_count?: number;
@@ -164,6 +165,24 @@ export interface Show {
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
   created_at: string;
   layout?: Layout;
+}
+
+export interface Agent {
+  id: string;
+  _id?: string;
+  name: string;
+  phone: string;
+  bank_account_name?: string;
+  bank_account_number?: string;
+  bank_ifsc?: string;
+  bank_name?: string;
+  payout_frequency: "DAILY" | "WEEKLY" | "MONTHLY";
+  active: boolean;
+  created_at: string;
+  updated_at?: string;
+  full_name?: string;
+  email?: string;
+  commission_percentage?: number;
 }
 
 export interface Seat {
@@ -189,17 +208,48 @@ export interface Customer {
   updated_at: string;
 }
 
+export interface Activity {
+  id: string;
+  _id?: string;
+  slug: string;
+  title: string;
+  category: string;
+  location: string;
+  duration: string;
+  price: number;
+  booking_price?: number;
+  daily_capacity?: number;
+  booking_status?: "ACTIVE" | "PAUSED";
+  rating?: number;
+  review_count?: number;
+  image?: string;
+  description?: string;
+  status?: "ACTIVE" | "DRAFT";
+  featured?: boolean;
+  tags?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Booking {
   id: string;
   _id?: string;
   booking_reference?: string;
-  show_id: string;
+  show_id?: string;
+  activity_id?: string;
+  booking_date?: string;
+  booking_type?: "SHOW" | "ACTIVITY";
   seat_id?: string;
   seat_code: string;
   booked_by: string;
   customer_id?: string;
   agent_id?: string;
+  agent_commission_percentage?: number;
   commission_amount?: number;
+  commission_status?: "UNPAID" | "PAID";
+  commission_period_key?: string;
+  commission_paid_at?: string;
+  commission_paid_by?: string;
   payment_method?: string;
   payment_status?: "PAID" | "COD_PENDING" | "PAYMENT_PENDING" | "FAILED" | "REFUNDED";
   payment_id?: string;
@@ -218,20 +268,26 @@ export interface Booking {
   cancellation_reviewed_by?: string;
   customer?: Customer;
   show?: Show;
+  activity?: Activity;
 }
 
 export interface Ticket {
   id: string;
   _id?: string;
   booking_id: string;
-  show_id: string;
-  seat_id: string;
+  show_id?: string;
+  activity_id?: string;
+  booking_type?: "SHOW" | "ACTIVITY";
+  seat_id?: string;
   seat_code: string;
   ticket_code: string;
   price: number;
   generated_by: string;
   generated_at: string;
   status: "ACTIVE" | "COMPLETED" | "REVOKED";
+  show?: Show;
+  activity?: Activity;
+  booking?: Booking;
 }
 
 export interface Notification {
@@ -248,6 +304,83 @@ export interface Notification {
   action_url?: string;
   severity?: "INFO" | "SUCCESS" | "WARNING" | "ERROR";
   metadata?: Record<string, any>;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface ContactMessage {
+  id: string;
+  _id?: string;
+  name: string;
+  email: string;
+  phone?: string;
+  message: string;
+  source?: string;
+  status: "NEW" | "READ" | "REPLIED" | "ARCHIVED";
+  admin_note?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface PackageItem {
+  id: string;
+  _id?: string;
+  title: string;
+  slug: string;
+  image: string;
+  summary: string;
+  description?: string;
+  price: number;
+  duration: string;
+  group_size: string;
+  location: string;
+  status: "DRAFT" | "PUBLISHED";
+  featured?: boolean;
+  sort_order?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface BlogPost {
+  id: string;
+  _id?: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content?: string;
+  image: string;
+  author?: string;
+  tags?: string[];
+  status: "DRAFT" | "PUBLISHED";
+  published_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface GalleryItem {
+  id: string;
+  _id?: string;
+  title: string;
+  media_type: "IMAGE" | "VIDEO";
+  media_url: string;
+  thumbnail_url?: string;
+  caption?: string;
+  status: "DRAFT" | "PUBLISHED";
+  sort_order?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface Review {
+  id: string;
+  _id?: string;
+  customer_name: string;
+  rating: number;
+  comment: string;
+  target_type: "SHOW" | "ACTIVITY" | "GENERAL";
+  target_id?: string;
+  status: "PENDING" | "PUBLISHED" | "REJECTED" | "HIDDEN";
+  source: "ADMIN" | "CUSTOMER";
   created_at: string;
   updated_at?: string;
 }

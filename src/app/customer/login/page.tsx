@@ -262,10 +262,10 @@ export default function CustomerLoginPage() {
           <div className="max-w-2xl">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 ring-1 ring-emerald-100">
               <ShieldCheck className="h-4 w-4" />
-              Secure mobile login
+              Secure login
             </div>
             <h1 className="text-5xl font-black leading-tight sm:text-6xl">
-              Your Kalari bookings, tickets, and requests.
+              Your bookings, tickets, and requests.
             </h1>
             <p className="mt-5 max-w-xl text-lg font-medium leading-8 text-stone-600">
               Use your booking mobile number to view tickets, manage bookings,

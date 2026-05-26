@@ -9,16 +9,21 @@ import {
   MapPin,
   Search,
   Star,
+  MessageSquareQuote,
 } from "lucide-react";
 import PublicNavbar from "@/components/PublicNavbar";
 import { PublicFooter } from "@/components/PublicFooter";
+import { HeroBadge } from "@/components/PublicHero";
 import { DatePicker } from "@/components/ui";
-import { formatDisplayDateValue, formatDisplayTimeValue } from "@/components/ui/date-utils";
+import {
+  formatDisplayDateValue,
+  formatDisplayTimeValue,
+} from "@/components/ui/date-utils";
 import { activityImages } from "@/lib/seedData";
 import { getAvailabilityLabel } from "@/lib/booking";
 import { toDisplayTitle } from "@/lib/textFormat";
 
-type SearchType = "all" | "events" | "activities";
+type SearchType = "all" | "shows" | "activities";
 
 type Activity = {
   id: string;
@@ -34,6 +39,8 @@ type Activity = {
   image?: string;
   description?: string;
   featured?: boolean;
+  booking_status?: "ACTIVE" | "PAUSED";
+  daily_capacity?: number;
 };
 
 type Show = {
@@ -52,17 +59,40 @@ type Show = {
   description?: string;
 };
 
-const publicRecordId = (record: { id?: string; _id?: string }, fallback: string) =>
-  String(record.id || record._id || fallback);
+type Review = {
+  id?: string;
+  _id?: string;
+  customer_name: string;
+  rating: number;
+  comment: string;
+  status: "PENDING" | "PUBLISHED" | "REJECTED" | "HIDDEN";
+};
+
+const publicRecordId = (
+  record: { id?: string; _id?: string },
+  fallback: string,
+) => String(record.id || record._id || fallback);
 
 const publicShowBookingHref = (show: { id?: string; _id?: string }) => {
   const showId = String(show.id || show._id || "");
   return showId ? `/book?show=${encodeURIComponent(showId)}` : "/book";
 };
 
+const publicActivityHref = (activity: {
+  slug?: string;
+  id?: string;
+  _id?: string;
+}) => {
+  const activityId = String(activity.id || activity._id || activity.slug || "");
+  return activityId
+    ? `/activities/${encodeURIComponent(activityId)}`
+    : "/activities";
+};
+
 export default function Home() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -73,18 +103,46 @@ export default function Home() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const [activitiesResponse, showsResponse] = await Promise.all([
-        fetch("/api/activities?status=ACTIVE").catch(() => null),
-        fetch("/api/shows").catch(() => null),
-      ]);
+      const [activitiesResponse, showsResponse, reviewsResponse] =
+        await Promise.all([
+          fetch("/api/activities?status=ACTIVE").catch(() => null),
+          fetch("/api/shows?upcoming=true").catch(() => null),
+          fetch("/api/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              collection: "reviews",
+              operation: "select",
+              filters: { status: "PUBLISHED" },
+              orderBy: { column: "created_at", ascending: false },
+              limitBy: 6,
+            }),
+          }).catch(() => null),
+        ]);
 
       const activitiesPayload = await activitiesResponse
         ?.json()
         .catch(() => null);
       const showsPayload = await showsResponse?.json().catch(() => null);
+      const reviewsPayload = await reviewsResponse?.json().catch(() => null);
 
-      setActivities(activitiesPayload?.data || []);
-      setShows(showsPayload?.data || []);
+      setActivities(
+        (activitiesPayload?.data || []).filter(
+          (activity: Activity) =>
+            activity.booking_status !== "PAUSED" &&
+            Number(activity.daily_capacity || 20) > 0,
+        ),
+      );
+      setShows(
+        (showsPayload?.data || []).filter(
+          (show: Show) =>
+            show.type === "KALARI" &&
+            show.status === "ACTIVE" &&
+            show.availability_status !== "SOLD_OUT" &&
+            Number(show.available_count ?? 1) > 0,
+        ),
+      );
+      setReviews(reviewsPayload?.data || []);
       setLoading(false);
     };
     load();
@@ -110,9 +168,7 @@ export default function Home() {
     activityById.get(shows[0]?.activity_id || "")?.image ||
     activities[0]?.image ||
     activityImages.hero;
-  const kalaryShows = shows
-    .filter((show) => show.type === "KALARI")
-    .slice(0, 8);
+  const kalaryShows = shows.slice(0, 8);
   const activityBookings = activities
     .filter((activity) => activity.category !== "Kalari Booking")
     .slice(0, 8);
@@ -129,7 +185,7 @@ export default function Home() {
       .slice(0, 5);
   }, [normalizedSearch, searchType, shows]);
   const matchedActivities = useMemo(() => {
-    if (!normalizedSearch || searchType === "events") return [];
+    if (!normalizedSearch || searchType === "shows") return [];
 
     return activities
       .filter((activity) =>
@@ -165,16 +221,16 @@ export default function Home() {
       <section className="relative min-h-[650px] overflow-visible md:min-h-[720px]">
         <img
           src={heroImage}
-          alt="Kalary booking experiences"
+          alt="Kalari booking experiences"
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-stone-950/55" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-white to-transparent" />
         <div className="relative mx-auto flex min-h-[650px] max-w-[1530px] flex-col items-center justify-center px-4 pb-16 pt-28 text-center md:min-h-[720px] sm:px-6 lg:px-8">
           <div className="mx-auto max-w-4xl">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary-300/30 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-primary-200 backdrop-blur">
+            <HeroBadge className="mb-5">
               Live Kalari shows and local experiences
-            </div>
+            </HeroBadge>
             <h1 className="mx-auto flex max-w-6xl flex-col items-center text-center text-5xl font-black leading-[1.04] text-white sm:text-6xl lg:text-[4rem] xl:text-[4.35rem] 2xl:text-[4.65rem]">
               <span className="block text-center lg:whitespace-nowrap">
                 Book Kovalam's Kalari
@@ -184,7 +240,7 @@ export default function Home() {
               </span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-lg font-semibold leading-8 text-white/80">
-              Search live performances, special events, and curated activities.
+              Search live performances and curated activities.
             </p>
           </div>
 
@@ -200,7 +256,7 @@ export default function Home() {
               <div className="grid grid-cols-3 gap-1 rounded-xl bg-stone-100 p-1 md:col-span-4">
                 {[
                   { value: "all", label: "All" },
-                  { value: "events", label: "Events" },
+                  { value: "shows", label: "Shows" },
                   { value: "activities", label: "Activities" },
                 ].map((option) => (
                   <button
@@ -228,7 +284,7 @@ export default function Home() {
                       setSearchOpen(true);
                     }}
                     onFocus={() => normalizedSearch && setSearchOpen(true)}
-                    placeholder="Search Kalari shows, events, or activities"
+                    placeholder="Search Kalari shows or activities"
                     aria-label="Search shows and activities"
                     aria-expanded={searchOpen}
                     className="min-w-0 flex-1 bg-transparent text-left text-base font-bold text-slate-800 outline-none placeholder:text-slate-400 sm:text-lg"
@@ -240,10 +296,13 @@ export default function Home() {
                     {hasSearchSuggestions ? (
                       <>
                         {matchedShows.length > 0 && (
-                          <SearchSuggestionGroup title="Events">
+                          <SearchSuggestionGroup title="Shows">
                             {matchedShows.map((show) => (
                               <SearchSuggestion
-                                key={publicRecordId(show, `suggestion-show-${show.title}-${show.date}`)}
+                                key={publicRecordId(
+                                  show,
+                                  `suggestion-show-${show.title}-${show.date}`,
+                                )}
                                 href={publicShowBookingHref(show)}
                                 image={
                                   show.image ||
@@ -264,8 +323,11 @@ export default function Home() {
                           <SearchSuggestionGroup title="Activities">
                             {matchedActivities.map((activity) => (
                               <SearchSuggestion
-                                key={publicRecordId(activity, `suggestion-activity-${activity.slug || activity.title}`)}
-                                href={`/activities/${activity.slug}`}
+                                key={publicRecordId(
+                                  activity,
+                                  `suggestion-activity-${activity.slug || activity.title}`,
+                                )}
+                                href={publicActivityHref(activity)}
                                 image={activity.image || activityImages.hero}
                                 title={toDisplayTitle(activity.title)}
                                 meta={`${toDisplayTitle(activity.category)} | ${toDisplayTitle(activity.location || "Kovalam")}`}
@@ -323,7 +385,7 @@ export default function Home() {
         <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <p className="text-sm font-black uppercase tracking-widest text-primary-600">
-              Kalary booking
+              Kalari booking
             </p>
             <h2 className="mt-2 text-3xl font-black leading-tight sm:text-4xl md:text-5xl">
               Reserve live Kalari shows
@@ -344,7 +406,10 @@ export default function Home() {
           <div className="grid auto-cols-[320px] grid-flow-col gap-7 overflow-x-auto pb-5 lg:grid-flow-row lg:grid-cols-3 xl:grid-cols-4">
             {kalaryShows.map((show) => (
               <ShowCard
-                key={publicRecordId(show, `home-show-${show.title}-${show.date}`)}
+                key={publicRecordId(
+                  show,
+                  `home-show-${show.title}-${show.date}`,
+                )}
                 show={show}
                 image={
                   show.image ||
@@ -370,8 +435,8 @@ export default function Home() {
             </h2>
           </div>
           <Link
-            href="/activities"
-            className="inline-flex items-center gap-2 rounded-full bg-[#10284a] px-6 py-3 font-black text-white"
+            href="/book"
+            className="btn-gradient-primary inline-flex items-center gap-2 rounded-full px-6 py-3 font-black text-white shadow-lg shadow-primary-900/15"
           >
             View all activities
             <ArrowRight className="h-5 w-5" />
@@ -383,13 +448,58 @@ export default function Home() {
         ) : activityBookings.length ? (
           <div className="grid auto-cols-[280px] grid-flow-col gap-7 overflow-x-auto pb-5 md:grid-flow-row md:grid-cols-3 lg:grid-cols-4">
             {activityBookings.map((activity) => (
-              <ActivityCard key={publicRecordId(activity, `home-activity-${activity.slug || activity.title}`)} activity={activity} />
+              <ActivityCard
+                key={publicRecordId(
+                  activity,
+                  `home-activity-${activity.slug || activity.title}`,
+                )}
+                activity={activity}
+              />
             ))}
           </div>
         ) : (
           <EmptyState text="No activities are available right now." />
         )}
       </section>
+
+      {reviews.length > 0 ? (
+        <section className="mx-auto max-w-[1530px] px-4 py-12 sm:px-6 lg:px-8">
+          <div className="mb-7 text-center">
+            <p className="inline-flex items-center gap-2 text-sm font-black uppercase tracking-widest text-primary-600">
+              <MessageSquareQuote className="h-4 w-4" />
+              Guest reviews
+            </p>
+            <h2 className="mt-2 text-3xl font-black leading-tight sm:text-4xl md:text-5xl">
+              What visitors say
+            </h2>
+          </div>
+          <div className="grid gap-5 md:grid-cols-3">
+            {reviews.slice(0, 3).map((review, index) => (
+              <article
+                key={publicRecordId(review, `review-${index}`)}
+                className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
+              >
+                <div className="mb-4 flex gap-1 text-[#ffb800]">
+                  {Array.from({
+                    length: Math.max(
+                      1,
+                      Math.min(5, Number(review.rating || 5)),
+                    ),
+                  }).map((_, starIndex) => (
+                    <Star key={starIndex} className="h-4 w-4 fill-current" />
+                  ))}
+                </div>
+                <p className="line-clamp-4 text-sm font-semibold leading-7 text-stone-600">
+                  {review.comment}
+                </p>
+                <p className="mt-5 font-black text-stone-950">
+                  {toDisplayTitle(review.customer_name)}
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <PublicFooter />
     </main>
@@ -417,7 +527,9 @@ const ShowCard = ({ show, image }: { show: Show; image: string }) => (
       </span>
     </div>
     <div className="p-5">
-      <h3 className="text-2xl font-black leading-tight">{toDisplayTitle(show.title)}</h3>
+      <h3 className="text-2xl font-black leading-tight">
+        {toDisplayTitle(show.title)}
+      </h3>
       {show.description && (
         <p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-slate-600">
           {toDisplayTitle(show.description)}
@@ -425,7 +537,8 @@ const ShowCard = ({ show, image }: { show: Show; image: string }) => (
       )}
       <div className="mt-4 flex flex-wrap gap-3 text-sm font-semibold text-slate-600">
         <span className="inline-flex items-center gap-1">
-          <CalendarDays className="h-4 w-4" /> {formatDisplayDateValue(show.date)}
+          <CalendarDays className="h-4 w-4" />{" "}
+          {formatDisplayDateValue(show.date)}
         </span>
         <span className="inline-flex items-center gap-1">
           <Clock className="h-4 w-4" /> {formatDisplayTimeValue(show.time)}
@@ -442,7 +555,7 @@ const ShowCard = ({ show, image }: { show: Show; image: string }) => (
         <span
           className={`rounded-full px-5 py-3 text-sm font-black text-white ${show.availability_status === "SOLD_OUT" ? "bg-slate-400" : "btn-gradient-primary"}`}
         >
-          {show.availability_status === "SOLD_OUT" ? "Full" : "Book"}
+          {show.availability_status === "SOLD_OUT" ? "Full" : "Book Now"}
         </span>
       </div>
     </div>
@@ -451,8 +564,8 @@ const ShowCard = ({ show, image }: { show: Show; image: string }) => (
 
 const ActivityCard = ({ activity }: { activity: Activity }) => (
   <Link
-    href={`/activities/${activity.slug}`}
-    className="group min-w-[280px] overflow-hidden rounded-lg bg-white md:min-w-0"
+    href={publicActivityHref(activity)}
+    className="group min-w-[280px] overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-1 hover:shadow-xl md:min-w-0"
   >
     <div className="relative">
       <img
@@ -461,20 +574,30 @@ const ActivityCard = ({ activity }: { activity: Activity }) => (
         className="h-[230px] w-full rounded-lg object-cover transition duration-500 group-hover:scale-[1.03]"
       />
     </div>
-    <h3 className="mt-3 text-xl font-black leading-tight">{toDisplayTitle(activity.title)}</h3>
-    <div className="mt-1 flex items-center gap-2 text-sm font-bold text-slate-600">
-      <Star className="h-4 w-4 fill-[#ffb800] text-[#ffb800]" />
-      {activity.rating || 0} ({activity.review_count || 0})
+    <div className="p-5">
+      <h3 className="text-xl font-black leading-tight">
+        {toDisplayTitle(activity.title)}
+      </h3>
+      <div className="mt-1 flex items-center gap-2 text-sm font-bold text-slate-600">
+        <Star className="h-4 w-4 fill-[#ffb800] text-[#ffb800]" />
+        {activity.rating || 0} ({activity.review_count || 0})
+      </div>
+      <p className="mt-2 line-clamp-2 text-sm font-medium text-slate-600">
+        {toDisplayTitle(activity.description)}
+      </p>
+      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
+        <span className="text-sm font-bold text-slate-500">
+          From{" "}
+          <strong className="text-lg text-[#10284a]">
+            Rs. {activity.price}
+          </strong>
+        </span>
+        <span className="btn-gradient-primary inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-black text-white">
+          Book Now
+          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+        </span>
+      </div>
     </div>
-    <p className="mt-2 line-clamp-2 text-sm font-medium text-slate-600">
-      {toDisplayTitle(activity.description)}
-    </p>
-    <p className="mt-3 text-sm font-bold text-slate-500">
-      From{" "}
-      <span className="text-lg font-black text-[#10284a]">
-        Rs. {activity.price}
-      </span>
-    </p>
   </Link>
 );
 

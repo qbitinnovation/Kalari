@@ -42,22 +42,6 @@ async function seed() {
   );
 
   await UserModel.updateOne(
-    { email: "agent@kalari.local" },
-    {
-      $set: {
-        email: "agent@kalari.local",
-        password_hash,
-        role: "agent",
-        full_name: "Booking Agent",
-        active: true,
-        updated_at: new Date().toISOString(),
-      },
-      $setOnInsert: { created_at: new Date().toISOString() },
-    },
-    { upsert: true }
-  );
-
-  await UserModel.updateOne(
     { email: "staff@kalari.local" },
     {
       $set: {
@@ -78,6 +62,15 @@ async function seed() {
     seedCollection("shows", data.shows),
     seedCollection("layouts", data.layouts),
   ]);
+  const agentCount = await seedCollection("agents", [{
+    id: "agent-local",
+    name: "Booking Agent",
+    phone: "+91 98765 43210",
+    payout_frequency: "MONTHLY",
+    active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }]);
 
   return {
     ok: true,
@@ -85,12 +78,12 @@ async function seed() {
       ...envCredentialSummary(),
       localAdmin: "admin@kalari.local / admin123",
       staff: "staff@kalari.local / staff123",
-      agent: "agent@kalari.local / admin123",
     },
     counts: {
       activities: activityCount,
       shows: showCount,
       layouts: layoutCount,
+      agents: agentCount,
     },
   };
 }
@@ -109,12 +102,12 @@ export async function GET() {
         ...envCredentialSummary(),
         localAdmin: "admin@kalari.local / admin123",
         staff: "staff@kalari.local / staff123",
-        agent: "agent@kalari.local / admin123",
       },
       counts: {
         activities: store.activities.length,
         shows: store.shows.length,
         layouts: store.layouts.length,
+        agents: (store.agents || []).length,
       },
       mongoError: error.message || "Seed failed",
     });

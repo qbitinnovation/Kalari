@@ -80,13 +80,19 @@ const attachRelations = async (collection: string, docs: any[] | any) => {
 
   if (collection === "bookings") {
     const Show = getGenericModel("shows") as any;
+    const Activity = getGenericModel("activities") as any;
     const Customer = getGenericModel("customers") as any;
-    const [shows, customers] = await Promise.all([Show.find().lean(), Customer.find().lean()]);
+    const [shows, activities, customers] = await Promise.all([Show.find().lean(), Activity.find().lean(), Customer.find().lean()]);
     const showById = new Map<string, any>();
+    const activityById = new Map<string, any>();
     const customerById = new Map<string, any>();
     shows.forEach((show: any) => {
       const id = recordId(show);
       if (id) showById.set(id, show);
+    });
+    activities.forEach((activity: any) => {
+      const id = recordId(activity);
+      if (id) activityById.set(id, activity);
     });
     customers.forEach((customer: any) => {
       const id = recordId(customer);
@@ -94,26 +100,33 @@ const attachRelations = async (collection: string, docs: any[] | any) => {
     });
     rows.forEach((booking: any) => {
       if (booking.show_id) booking.show = showById.get(String(booking.show_id)) || null;
+      if (booking.activity_id) booking.activity = activityById.get(String(booking.activity_id)) || null;
       if (booking.customer_id) booking.customer = customerById.get(String(booking.customer_id)) || null;
     });
   }
 
   if (collection === "tickets") {
     const Show = getGenericModel("shows") as any;
+    const Activity = getGenericModel("activities") as any;
     const Booking = getGenericModel("bookings") as any;
     const Customer = getGenericModel("customers") as any;
-    const [shows, bookings, customers] = await Promise.all([Show.find().lean(), Booking.find().lean(), Customer.find().lean()]);
+    const [shows, activities, bookings, customers] = await Promise.all([Show.find().lean(), Activity.find().lean(), Booking.find().lean(), Customer.find().lean()]);
     const showById = new Map<string, any>();
+    const activityById = new Map<string, any>();
     const bookingById = new Map<string, any>();
     const customerById = new Map<string, any>();
     shows.forEach((show: any) => showById.set(String(recordId(show)), show));
+    activities.forEach((activity: any) => activityById.set(String(recordId(activity)), activity));
     bookings.forEach((booking: any) => bookingById.set(String(recordId(booking)), booking));
     customers.forEach((customer: any) => customerById.set(String(recordId(customer)), customer));
     rows.forEach((ticket: any) => {
       if (ticket.show_id) ticket.show = showById.get(String(ticket.show_id)) || null;
+      if (ticket.activity_id) ticket.activity = activityById.get(String(ticket.activity_id)) || null;
       if (ticket.booking_id) {
         const booking = bookingById.get(String(ticket.booking_id)) || null;
         if (booking?.customer_id) booking.customer = customerById.get(String(booking.customer_id)) || null;
+        if (booking?.show_id) booking.show = showById.get(String(booking.show_id)) || null;
+        if (booking?.activity_id) booking.activity = activityById.get(String(booking.activity_id)) || null;
         ticket.booking = booking;
         ticket.booked_by = booking?.booked_by || ticket.generated_by;
       }
@@ -146,12 +159,13 @@ export async function POST(req: NextRequest) {
       if (collection === "bookings") {
         const Show = getGenericModel("shows") as any;
         const bookingShows = await Promise.all((insertPayload || []).map(async (booking: any) => {
+          if (booking?.booking_type === "ACTIVITY" || booking?.activity_id) return true;
           const showId = String(booking?.show_id || "");
           const byPublicId = showId ? await Show.findOne({ id: showId }).lean() : null;
           if (byPublicId) return byPublicId;
           return mongoose.Types.ObjectId.isValid(showId) ? Show.findById(showId).lean() : null;
         }));
-        if (bookingShows.some((show) => !isShowBookableAt(show))) {
+        if (bookingShows.some((show) => show !== true && !isShowBookableAt(show))) {
           return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
         }
       }

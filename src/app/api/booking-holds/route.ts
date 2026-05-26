@@ -14,6 +14,7 @@ import {
   parseSeatCodes,
 } from "@/lib/booking";
 import { createNotification } from "@/lib/notificationStore";
+import { calculateEventCommission, getCommissionPeriodKey } from "@/lib/agentCommission";
 
 type HoldAction = "CONFIRM" | "RELEASE";
 
@@ -107,7 +108,7 @@ const ensureLocalCustomer = (store: any, form: any) => {
   return customer;
 };
 
-const buildHold = ({ show, seatCodes, customer, form, commissionAmount = 0 }: { show: any; seatCodes: string[]; customer: any; form: any; commissionAmount?: number }) => {
+const buildHold = ({ show, seatCodes, customer, form, commissionAmount = 0, commissionPercentage = 0, commissionPeriodKey = null }: { show: any; seatCodes: string[]; customer: any; form: any; commissionAmount?: number; commissionPercentage?: number; commissionPeriodKey?: string | null }) => {
   const now = nowIso();
   return {
     booking_reference: createBookingReference(new Date(now)),
@@ -119,7 +120,10 @@ const buildHold = ({ show, seatCodes, customer, form, commissionAmount = 0 }: { 
     payment_status: "PAYMENT_PENDING",
     total_amount: Number(show.price || 0) * seatCodes.length,
     agent_id: show.type === "EVENT" ? show.agent_id || null : null,
+    agent_commission_percentage: commissionPercentage,
     commission_amount: commissionAmount,
+    commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
+    commission_period_key: commissionPeriodKey,
     booking_time: now,
     status: "HELD",
     hold_token: holdToken(),
@@ -167,7 +171,7 @@ export async function POST(req: NextRequest) {
     const Booking = getGenericModel("bookings") as any;
     const Customer = getGenericModel("customers") as any;
     const Layout = getGenericModel("layouts") as any;
-    const User = getGenericModel("users") as any;
+    const Agent = getGenericModel("agents") as any;
     await expireMongoHolds(Booking);
 
     const show = await findDocument(Show, showId);
@@ -185,11 +189,13 @@ export async function POST(req: NextRequest) {
     if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
     const customer = await ensureMongoCustomer(Customer, form);
-    const linkedAgent = show.type === "EVENT" && show.agent_id ? await findDocument(User, String(show.agent_id)) : null;
-    const commissionAmount = linkedAgent
-      ? (Number(show.price || 0) * seatCodes.length * Number(linkedAgent.commission_percentage || 0)) / 100
+    const linkedAgent = show.type === "EVENT" && show.agent_id ? await findDocument(Agent, String(show.agent_id)) : null;
+    const commissionPercentage = show.type === "EVENT" && show.agent_id ? Number(show.agent_commission_percentage || 0) : 0;
+    const commissionAmount = linkedAgent || show.agent_id
+      ? calculateEventCommission(Number(show.price || 0) * seatCodes.length, commissionPercentage)
       : 0;
-    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form, commissionAmount }));
+    const commissionPeriodKey = commissionAmount > 0 ? getCommissionPeriodKey(new Date(), linkedAgent?.payout_frequency || "DAILY") : null;
+    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form, commissionAmount, commissionPercentage, commissionPeriodKey }));
     return NextResponse.json({ data: holdPayload(booking) }, { status: 201 });
   } catch (error: any) {
     const showId = String(body?.showId || "");
@@ -218,14 +224,16 @@ export async function POST(req: NextRequest) {
       if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
       const customer = ensureLocalCustomer(store, form);
       const linkedAgent = show.type === "EVENT" && show.agent_id
-        ? (store.users || []).find((user: any) => recordId(user) === String(show.agent_id))
+        ? (store.agents || []).find((agent: any) => recordId(agent) === String(show.agent_id))
         : null;
-      const commissionAmount = linkedAgent
-        ? (Number(show.price || 0) * seatCodes.length * Number(linkedAgent.commission_percentage || 0)) / 100
+      const commissionPercentage = show.type === "EVENT" && show.agent_id ? Number(show.agent_commission_percentage || 0) : 0;
+      const commissionAmount = linkedAgent || show.agent_id
+        ? calculateEventCommission(Number(show.price || 0) * seatCodes.length, commissionPercentage)
         : 0;
+      const commissionPeriodKey = commissionAmount > 0 ? getCommissionPeriodKey(new Date(), linkedAgent?.payout_frequency || "DAILY") : null;
       const booking = {
         id: `bookings-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ...buildHold({ show, seatCodes, customer, form, commissionAmount }),
+        ...buildHold({ show, seatCodes, customer, form, commissionAmount, commissionPercentage, commissionPeriodKey }),
       };
       store.bookings = store.bookings || [];
       store.bookings.push(booking);

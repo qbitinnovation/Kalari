@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { db, Show, Layout } from "@/lib/database";
+import { db, Show, Layout, type Agent } from "@/lib/database";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { format } from "date-fns";
 import { useDarkMode } from "@/hooks/useDarkMode";
@@ -16,6 +16,7 @@ import { isActiveBookingReservation } from "@/lib/booking";
 import { getDefaultArenaStructure } from "@/lib/arenaLayout";
 import { toDisplayTitle } from "@/lib/textFormat";
 import { formatDisplayDateValue, formatDisplayTimeValue } from "@/components/ui/date-utils";
+import { getAgentContact, getAgentDisplayName } from "@/lib/agentCommission";
 import {
   Button,
   AdminTable,
@@ -41,14 +42,6 @@ const findDefaultKalariLayoutId = (layouts: Layout[]) =>
       layouts.find((layout) => layout.name === DEFAULT_KALARI_LAYOUT_NAME) ||
       ({} as Layout),
   );
-type Agent = {
-  id: string;
-  _id?: string;
-  full_name: string;
-  email: string;
-  commission_percentage?: number;
-};
-
 const Shows: React.FC = () => {
   const { user } = useAuth();
   const [shows, setShows] = useState<Show[]>([]);
@@ -73,6 +66,7 @@ const Shows: React.FC = () => {
     layout_id: "",
     activity_id: "",
     agent_id: "",
+    agent_commission_percentage: "",
     status: "ACTIVE" as "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE",
   });
   const showStatusLabels: Record<string, string> = {
@@ -288,13 +282,26 @@ const Shows: React.FC = () => {
 
   const fetchAgents = async () => {
     try {
-      const { data } = await db
+      const { data, error } = await db
+        .from("agents")
+        .select("*")
+        .eq("active", true)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      const legacy = await db
         .from("users")
         .select("*")
         .eq("role", "agent")
         .eq("active", true)
         .order("full_name", { ascending: true });
-      setAgents(data || []);
+      const legacyAgents = (legacy.data || []).map((agent: any) => ({
+        ...agent,
+        name: agent.full_name,
+        phone: agent.phone || agent.email,
+        payout_frequency: "MONTHLY",
+      }));
+      const existingIds = new Set((data || []).map((agent: any) => String(agent.id || agent._id)));
+      setAgents([...(data || []), ...legacyAgents.filter((agent: any) => !existingIds.has(String(agent.id || agent._id)))]);
     } catch (error) {
       console.error("Error fetching agents:", error);
     }
@@ -320,6 +327,8 @@ const Shows: React.FC = () => {
         layout_id: layoutId,
         activity_id: formData.activity_id || null,
         agent_id: formData.type === "EVENT" ? formData.agent_id || null : null,
+        agent_commission_percentage:
+          formData.type === "EVENT" ? Number(formData.agent_commission_percentage || 0) : 0,
         status: formData.status,
       };
 
@@ -372,6 +381,7 @@ const Shows: React.FC = () => {
       layout_id: show.layout_id || "",
       activity_id: (show as any).activity_id || "",
       agent_id: show.agent_id || "",
+      agent_commission_percentage: String(show.agent_commission_percentage || (show as any).commission_percentage || ""),
       status: (show.status as any) || "ACTIVE",
     });
     setShowModal(true);
@@ -414,6 +424,7 @@ const Shows: React.FC = () => {
       layout_id: findDefaultKalariLayoutId(layouts),
       activity_id: "",
       agent_id: "",
+      agent_commission_percentage: "",
       status: "ACTIVE",
     });
   };
@@ -727,10 +738,19 @@ const Shows: React.FC = () => {
                       { value: "__none__", label: "No linked agent" },
                       ...agents.map((agent) => ({
                         value: String(agent.id || agent._id),
-                        label: `${agent.full_name} (${agent.commission_percentage || 0}%)`,
+                        label: `${getAgentDisplayName(agent)}${getAgentContact(agent) ? ` (${getAgentContact(agent)})` : ""}`,
                       })),
                     ]}
                     searchable={agents.length > 3}
+                  />
+                  <Input
+                    label="Event Commission (%)"
+                    type="number"
+                    value={formData.agent_commission_percentage}
+                    onChange={(agent_commission_percentage) =>
+                      setFormData({ ...formData, agent_commission_percentage })
+                    }
+                    placeholder="0"
                   />
                 </div>
               )}
