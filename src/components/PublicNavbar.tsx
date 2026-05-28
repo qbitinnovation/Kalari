@@ -47,7 +47,6 @@ const PublicNavbar = () => {
     { href: '/blog', label: 'Blog' },
     { href: '/about', label: 'About' },
     { href: '/contact', label: 'Contact' },
-    { href: '/book', label: 'Book Now' },
   ]
 
   const isActiveLink = (href: string) =>

@@ -193,6 +193,44 @@ code {
   animation: pulse-slow 3s infinite ease-in-out;
 }
 
+@keyframes home-show-center-next {
+  from { opacity: 0.72; transform: translateX(4rem) scale(0.96); filter: saturate(0.82); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: saturate(1); }
+}
+
+@keyframes home-show-center-previous {
+  from { opacity: 0.72; transform: translateX(-4rem) scale(0.96); filter: saturate(0.82); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: saturate(1); }
+}
+
+@keyframes home-show-side-left {
+  from { opacity: 0.9; transform: translateX(1.5rem); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes home-show-side-right {
+  from { opacity: 0.9; transform: translateX(-1.5rem); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.home-show-slide-center-next {
+  animation: home-show-center-next 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.home-show-slide-center-previous {
+  animation: home-show-center-previous 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.home-show-slide-left,
+.home-show-slide-left-previous {
+  animation: home-show-side-left 560ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.home-show-slide-right,
+.home-show-slide-right-next {
+  animation: home-show-side-right 560ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Glassmorphism */
 .glass {
   background: rgba(255, 255, 255, 0.05);

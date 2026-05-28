@@ -63,6 +63,14 @@ const rejectInventoryConflict = (show: any, seatCodes: string[], bookings: any[]
 };
 
 const ensureMongoCustomer = async (Customer: any, form: any) => {
+  const customerId = String(form?.customerId || "");
+  if (customerId) {
+    const existingById = mongoose.Types.ObjectId.isValid(customerId)
+      ? await Customer.findOne({ $or: [{ id: customerId }, { _id: new mongoose.Types.ObjectId(customerId) }] }).lean()
+      : await Customer.findOne({ id: customerId }).lean();
+    if (existingById) return existingById;
+  }
+
   const phone = String(form?.phone || "").trim();
   const name = String(form?.name || "").trim();
   const email = String(form?.email || "").trim();
@@ -80,6 +88,12 @@ const ensureMongoCustomer = async (Customer: any, form: any) => {
 };
 
 const ensureLocalCustomer = (store: any, form: any) => {
+  const customerId = String(form?.customerId || "");
+  if (customerId) {
+    const existingById = (store.customers || []).find((customer: any) => recordId(customer) === customerId);
+    if (existingById) return existingById;
+  }
+
   const phone = String(form?.phone || "").trim();
   const name = String(form?.name || "").trim();
   const email = String(form?.email || "").trim();

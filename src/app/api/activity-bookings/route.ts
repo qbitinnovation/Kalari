@@ -36,6 +36,12 @@ const countActivityTickets = (bookings: any[]) =>
 
 async function ensureMongoCustomer(customerInput: any) {
   const Customer = getGenericModel("customers") as any;
+  const customerId = String(customerInput?.id || customerInput?.customerId || "");
+  if (customerId) {
+    const byId = await Customer.findOne(isObjectId(customerId) ? { $or: [{ id: customerId }, { _id: new mongoose.Types.ObjectId(customerId) }] } : { id: customerId }).lean();
+    if (byId) return byId;
+  }
+
   const phone = normalizePhone(customerInput?.phone || "");
   if (!phone) return null;
   const existing = await Customer.findOne({ phone }).lean();
@@ -51,6 +57,12 @@ async function ensureMongoCustomer(customerInput: any) {
 }
 
 function ensureLocalCustomer(store: any, customerInput: any) {
+  const customerId = String(customerInput?.id || customerInput?.customerId || "");
+  if (customerId) {
+    const byId = (store.customers || []).find((customer: any) => recordId(customer) === customerId);
+    if (byId) return byId;
+  }
+
   const phone = normalizePhone(customerInput?.phone || "");
   if (!phone) return null;
   store.customers = store.customers || [];
@@ -132,7 +144,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Only ${remaining} ticket(s) available for this activity date.` }, { status: 409 });
     }
 
-    const customer = await ensureMongoCustomer(body.customer || {});
+    const customer = await ensureMongoCustomer({ ...(body.customer || {}), customerId: body.customerId });
     const now = new Date();
     const bookingReference = createBookingReference(now);
     const bookedBy = customer?.name || body.customer?.name || "Walk-in customer";
@@ -196,7 +208,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Only ${remaining} ticket(s) available for this activity date.` }, { status: 409 });
     }
 
-    const customer = ensureLocalCustomer(store, body.customer || {});
+    const customer = ensureLocalCustomer(store, { ...(body.customer || {}), customerId: body.customerId });
     const now = new Date();
     const bookingReference = createBookingReference(now);
     const bookedBy = customer?.name || body.customer?.name || "Walk-in customer";

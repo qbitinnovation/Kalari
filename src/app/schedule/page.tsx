@@ -133,7 +133,7 @@ const Schedule: React.FC = () => {
         />
 
         {/* Filter Bar */}
-        <section className="sticky top-20 z-30 bg-white/80 backdrop-blur-xl border-b border-stone-200 py-4 shadow-sm">
+        <section className="sticky top-20 z-30 border-b border-stone-200 bg-white/80 py-4 shadow-sm backdrop-blur-xl">
           <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_16rem] sm:items-center">
               <SearchInput

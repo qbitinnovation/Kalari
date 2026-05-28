@@ -2,23 +2,32 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CheckCircle2, Minus, Plus, Printer, Ticket } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import PublicNavbar from "@/components/PublicNavbar";
 import { PublicFooter } from "@/components/PublicFooter";
-import { Button, DatePicker, Input, Select } from "@/components/ui";
+import { Button, DatePicker, Select } from "@/components/ui";
 import { formatDisplayDateValue, todayDateValue } from "@/components/ui/date-utils";
 import { getBookingReference } from "@/lib/booking";
 import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = any;
+type CustomerSession = {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+};
 
 const recordId = (record: any) => String(record?.id || record?._id || "");
 const activityRouteId = (activity: any) => String(activity?.id || activity?._id || activity?.slug || "");
+const CUSTOMER_SESSION_KEY = "kalari_customer";
+const PENDING_ACTIVITY_BOOKING_KEY = "kalari_pending_activity_booking";
 
 export default function ActivityBookingPage() {
   const params = useParams<{ slug: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedDate = searchParams.get("date") || "";
   const [activity, setActivity] = useState<Activity | null>(null);
@@ -31,6 +40,8 @@ export default function ActivityBookingPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [success, setSuccess] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -40,6 +51,47 @@ export default function ActivityBookingPage() {
       .catch(() => setNotice("Could not load this activity."))
       .finally(() => setLoading(false));
   }, [params.slug]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(CUSTOMER_SESSION_KEY);
+    if (!raw) {
+      setAuthChecked(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as CustomerSession;
+      if (!parsed?.id || !parsed?.phone) {
+        localStorage.removeItem(CUSTOMER_SESSION_KEY);
+        setAuthChecked(true);
+        return;
+      }
+      setCustomerSession(parsed);
+      setCustomer({ name: parsed.name || "Guest Customer", phone: parsed.phone || "", email: parsed.email || "" });
+      setAuthChecked(true);
+    } catch {
+      localStorage.removeItem(CUSTOMER_SESSION_KEY);
+      setAuthChecked(true);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    if (!authChecked || !customerSession) return;
+
+    const rawPending = sessionStorage.getItem(PENDING_ACTIVITY_BOOKING_KEY);
+    if (!rawPending) return;
+
+    try {
+      const pending = JSON.parse(rawPending);
+      if (pending.activitySlug && pending.activitySlug !== String(params.slug)) return;
+      if (pending.date) setDate(pending.date);
+      if (pending.ticketCount) setTicketCount(Number(pending.ticketCount));
+      if (pending.paymentMethod) setPaymentMethod(pending.paymentMethod);
+      sessionStorage.removeItem(PENDING_ACTIVITY_BOOKING_KEY);
+    } catch {
+      sessionStorage.removeItem(PENDING_ACTIVITY_BOOKING_KEY);
+    }
+  }, [authChecked, customerSession, params.slug]);
 
   useEffect(() => {
     if (!activity || !date) return;
@@ -56,6 +108,20 @@ export default function ActivityBookingPage() {
   const submitBooking = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!activity) return;
+    if (!customerSession) {
+      sessionStorage.setItem(
+        PENDING_ACTIVITY_BOOKING_KEY,
+        JSON.stringify({
+          activitySlug: String(params.slug),
+          date,
+          ticketCount,
+          paymentMethod,
+        }),
+      );
+      const nextPath = `${window.location.pathname}?date=${encodeURIComponent(date)}`;
+      router.push(`/customer/login?redirect=${encodeURIComponent(nextPath)}`);
+      return;
+    }
     setSaving(true);
     setNotice("");
     try {
@@ -66,6 +132,7 @@ export default function ActivityBookingPage() {
           activityId: recordId(activity),
           date,
           ticketCount,
+          customerId: customerSession.id,
           customer,
           paymentMethod,
         }),
@@ -80,7 +147,7 @@ export default function ActivityBookingPage() {
     }
   };
 
-  if (loading) {
+  if (loading || !authChecked) {
     return (
       <main className="min-h-screen bg-[#f7f3eb] text-[#10284a]">
         <PublicNavbar />
@@ -204,11 +271,19 @@ export default function ActivityBookingPage() {
                   </div>
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Input label="Name" value={customer.name} onChange={(name) => setCustomer({ ...customer, name })} placeholder="Enter your name" required variant="public" />
-                <Input label="Mobile Number" value={customer.phone} onChange={(phone) => setCustomer({ ...customer, phone })} placeholder="+91 98765 43210" required variant="public" />
-                <Input label="Email (optional)" value={customer.email} onChange={(email) => setCustomer({ ...customer, email })} placeholder="you@example.com" className="sm:col-span-2" variant="public" />
-              </div>
+              {customerSession ? (
+                <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+                  <div className="mb-3 text-sm font-black">Booking account</div>
+                  <Info label="Name" value={customerSession.name || "Customer"} />
+                  <Info label="Mobile" value={customerSession.phone} mono />
+                  {customerSession.email && <Info label="Email" value={customerSession.email} />}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-left">
+                  <div className="text-sm font-black text-amber-900">Login required</div>
+                  <p className="mt-1 text-sm font-semibold text-amber-900/80">Choose your date and tickets, then continue to login to confirm this booking.</p>
+                </div>
+              )}
               <div className="rounded-lg bg-stone-50 p-4">
                 <div className="flex items-center justify-between font-black">
                   <span className="inline-flex items-center gap-2"><Ticket className="h-5 w-5 text-primary-600" /> GENERAL x {ticketCount}</span>
@@ -216,7 +291,7 @@ export default function ActivityBookingPage() {
                 </div>
               </div>
               <Button type="submit" disabled={saving || ticketCount > available || activity.booking_status === "PAUSED"} fullWidth>
-                {saving ? "Booking..." : activity.booking_status === "PAUSED" ? "Booking paused" : "Confirm Activity Booking"}
+                {saving ? "Booking..." : activity.booking_status === "PAUSED" ? "Booking paused" : customerSession ? "Confirm Activity Booking" : "Login to Continue"}
               </Button>
             </form>
           )}

@@ -33,8 +33,15 @@ type LoginStep =
 
 const SESSION_KEY = "kalari_customer";
 
+const safeRedirectPath = (value: string | null) => {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/customer";
+  if (value.startsWith("/admin")) return "/customer";
+  return value;
+};
+
 export default function CustomerLoginPage() {
   const router = useRouter();
+  const [redirectPath, setRedirectPath] = useState("/customer");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
@@ -48,13 +55,15 @@ export default function CustomerLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
+    const nextRedirect = safeRedirectPath(new URLSearchParams(window.location.search).get("redirect"));
+    setRedirectPath(nextRedirect);
     const stored = localStorage.getItem(SESSION_KEY);
-    if (stored) router.replace("/customer");
+    if (stored) router.replace(nextRedirect);
   }, [router]);
 
   const storeSession = (customer: CustomerSession) => {
     localStorage.setItem(SESSION_KEY, JSON.stringify(customer));
-    router.replace("/customer");
+    router.replace(redirectPath);
   };
 
   const sendOtp = async (

@@ -12,14 +12,11 @@ import {
   Clock,
   CreditCard,
   MapPin,
-  Phone,
   Ticket,
-  User,
   WalletCards,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { db } from "@/lib/database";
-import { Input } from "@/components/ui";
 import {
   formatDisplayDateValue,
   formatDisplayTimeValue,
@@ -86,6 +83,23 @@ interface Show {
   agent_commission_percentage?: number;
 }
 
+interface Activity {
+  id: string;
+  _id?: string;
+  slug?: string;
+  title: string;
+  category?: string;
+  location?: string;
+  duration?: string;
+  price: number;
+  booking_price?: number;
+  image?: string;
+  description?: string;
+  status?: string;
+  booking_status?: "ACTIVE" | "PAUSED";
+  daily_capacity?: number;
+}
+
 interface SeatOption {
   id: string;
   label: string;
@@ -99,8 +113,18 @@ interface BookingForm {
   email: string;
 }
 
+type CustomerSession = {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+};
+
 type PaymentMethod = "razorpay" | "cod";
 type Step = "show" | "seats" | "details" | "payment" | "success";
+
+const CUSTOMER_SESSION_KEY = "kalari_customer";
+const PENDING_BOOKING_KEY = "kalari_pending_booking";
 
 const stepLabels: { id: Step; label: string }[] = [
   { id: "show", label: "Show" },
@@ -111,6 +135,9 @@ const stepLabels: { id: Step; label: string }[] = [
 
 const fallbackBookingImage =
   "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=1800&q=88";
+
+const activityRouteId = (activity: Activity) =>
+  encodeURIComponent(String(activity.slug || activity.id || activity._id || ""));
 
 const BookingContent: React.FC = () => {
   const searchParams = useSearchParams();
@@ -125,6 +152,7 @@ const BookingContent: React.FC = () => {
       ? preselectedShowId
       : "";
   const [shows, setShows] = useState<Show[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedShow, setSelectedShow] = useState<Show | null>(null);
   const [bookedSeats, setBookedSeats] = useState<Set<string>>(new Set());
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -136,6 +164,8 @@ const BookingContent: React.FC = () => {
     email: "",
   });
   const [errors, setErrors] = useState<Partial<BookingForm>>({});
+  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("razorpay");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -146,11 +176,40 @@ const BookingContent: React.FC = () => {
   );
   const [ticketCodes, setTicketCodes] = useState<string[]>([]);
   const [showsLoading, setShowsLoading] = useState(true);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
   const selectedShowIdRef = useRef("");
 
   useEffect(() => {
     fetchShows();
+    fetchActivities();
   }, []);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(CUSTOMER_SESSION_KEY);
+    if (!raw) {
+      setAuthChecked(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as CustomerSession;
+      if (!parsed?.id || !parsed?.phone) {
+        localStorage.removeItem(CUSTOMER_SESSION_KEY);
+        setAuthChecked(true);
+        return;
+      }
+      setCustomerSession(parsed);
+      setForm({
+        name: parsed.name || "Guest Customer",
+        phone: parsed.phone || "",
+        email: parsed.email || "",
+      });
+      setAuthChecked(true);
+    } catch {
+      localStorage.removeItem(CUSTOMER_SESSION_KEY);
+      setAuthChecked(true);
+    }
+  }, [router]);
 
   useEffect(() => {
     const showId = selectedShow ? getRecordId(selectedShow) : "";
@@ -175,6 +234,27 @@ const BookingContent: React.FC = () => {
     setStep("seats");
   }, [selectedShow, shows, validPreselectedShowId]);
 
+  useEffect(() => {
+    if (!authChecked || !customerSession || shows.length === 0) return;
+
+    const rawPending = sessionStorage.getItem(PENDING_BOOKING_KEY);
+    if (!rawPending) return;
+
+    try {
+      const pending = JSON.parse(rawPending);
+      const show = shows.find((item) => getRecordId(item) === pending.showId);
+      if (!show) return;
+
+      setSelectedShow(show);
+      setSelectedSeats(Array.isArray(pending.selectedSeats) ? pending.selectedSeats : []);
+      setEventTicketCount(Number(pending.eventTicketCount || 1));
+      setStep("details");
+      sessionStorage.removeItem(PENDING_BOOKING_KEY);
+    } catch {
+      sessionStorage.removeItem(PENDING_BOOKING_KEY);
+    }
+  }, [authChecked, customerSession, shows]);
+
   const fetchShows = async () => {
     setShowsLoading(true);
     let query = db
@@ -196,6 +276,25 @@ const BookingContent: React.FC = () => {
       ),
     );
     setShowsLoading(false);
+  };
+
+  const fetchActivities = async () => {
+    setActivitiesLoading(true);
+    try {
+      const response = await fetch("/api/activities?status=ACTIVE");
+      const payload = await response.json().catch(() => ({}));
+      setActivities(
+        (payload?.data || []).filter(
+          (activity: Activity) =>
+            activity.booking_status !== "PAUSED" &&
+            Number(activity.daily_capacity || 20) > 0,
+        ),
+      );
+    } catch {
+      setActivities([]);
+    } finally {
+      setActivitiesLoading(false);
+    }
   };
 
   const fetchBookedSeats = async (showId: string) => {
@@ -603,6 +702,8 @@ const BookingContent: React.FC = () => {
   };
 
   const findOrCreateCustomer = async () => {
+    if (customerSession?.id) return customerSession.id;
+
     const { data: existingCustomers } = await db
       .from("customers")
       .select("*")
@@ -674,7 +775,7 @@ const BookingContent: React.FC = () => {
           booking_reference: bookingReference,
           show_id: getRecordId(selectedShow),
           seat_code: JSON.stringify(seatCodesToSave),
-          booked_by: form.name.trim(),
+          booked_by: customerSession?.name || form.name.trim(),
           customer_id: customerId,
           booking_time: now,
           status: "CONFIRMED",
@@ -712,7 +813,7 @@ const BookingContent: React.FC = () => {
       seat_code: seatCode,
       ticket_code: generatedTicketCodes[index],
       price: Number(selectedShow.price || 0),
-      generated_by: form.name.trim(),
+      generated_by: customerSession?.name || form.name.trim(),
       generated_at: now,
       status: "ACTIVE",
     }));
@@ -760,7 +861,7 @@ const BookingContent: React.FC = () => {
           selectedShow.type === "EVENT"
             ? eventTicketCount
             : selectedSeats.length,
-        form,
+        form: { ...form, customerId: customerSession?.id },
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -923,6 +1024,20 @@ const BookingContent: React.FC = () => {
     }
   };
 
+  const requireLoginForSelection = () => {
+    if (!selectedShow) return;
+    sessionStorage.setItem(
+      PENDING_BOOKING_KEY,
+      JSON.stringify({
+        showId: getRecordId(selectedShow),
+        selectedSeats,
+        eventTicketCount,
+      }),
+    );
+    const showId = encodeURIComponent(getRecordId(selectedShow));
+    router.push(`/customer/login?redirect=${encodeURIComponent(`/book?show=${showId}`)}`);
+  };
+
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f3eb] text-stone-950 print:bg-white">
       <div className="min-h-screen min-w-0 print:block print:min-h-0">
@@ -1019,28 +1134,32 @@ const BookingContent: React.FC = () => {
 
             {step === "show" && (
               <div className="grid min-w-0 gap-4 md:grid-cols-2">
-                {showsLoading ? (
+                {showsLoading || activitiesLoading ? (
                   <div className="md:col-span-2 rounded-lg border border-stone-200 bg-white p-10 text-center text-stone-600 shadow-sm">
-                    Loading available shows...
+                    Loading bookable experiences...
                   </div>
                 ) : shows.filter(
                     (show) =>
                       (!preselectedDate || show.date === preselectedDate) &&
                       (!preselectedActivityId ||
                         (show as any).activity_id === preselectedActivityId),
+                  ).length === 0 &&
+                  activities.filter((activity) =>
+                    !preselectedActivityId || getRecordId(activity) === preselectedActivityId || activity.slug === preselectedActivityId
                   ).length === 0 ? (
                   <div className="md:col-span-2 rounded-lg border border-dashed border-stone-300 bg-white p-10 text-center text-stone-600">
-                    No shows available right now.
+                    No shows or activities available right now.
                   </div>
                 ) : (
-                  shows
-                    .filter(
-                      (show) =>
-                        (!preselectedDate || show.date === preselectedDate) &&
-                        (!preselectedActivityId ||
-                          (show as any).activity_id === preselectedActivityId),
-                    )
-                    .map((show) => (
+                  <>
+                    {shows
+                      .filter(
+                        (show) =>
+                          (!preselectedDate || show.date === preselectedDate) &&
+                          (!preselectedActivityId ||
+                            (show as any).activity_id === preselectedActivityId),
+                      )
+                      .map((show) => (
                       <button
                         key={getRecordId(show)}
                         onClick={() => {
@@ -1106,7 +1225,58 @@ const BookingContent: React.FC = () => {
                           </div>
                         </div>
                       </button>
-                    ))
+                      ))}
+                    {activities
+                      .filter((activity) =>
+                        !preselectedActivityId || getRecordId(activity) === preselectedActivityId || activity.slug === preselectedActivityId
+                      )
+                      .map((activity) => {
+                        const href = `/activities/${activityRouteId(activity)}/book${preselectedDate ? `?date=${encodeURIComponent(preselectedDate)}` : ""}`;
+                        return (
+                          <button
+                            key={getRecordId(activity)}
+                            onClick={() => router.push(href)}
+                            className="group flex h-full min-h-[445px] w-full max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg bg-white text-left shadow-sm ring-1 ring-stone-200 transition hover:-translate-y-0.5 hover:shadow-xl md:max-w-none"
+                          >
+                            <img
+                              src={activity.image || fallbackBookingImage}
+                              alt={activity.title}
+                              className="h-40 w-full object-cover object-[50%_68%] transition duration-500 group-hover:scale-105"
+                            />
+                            <div className="flex flex-1 flex-col p-5">
+                              <div className="mb-3 grid grid-cols-2 gap-2 text-xs font-bold sm:flex sm:flex-wrap">
+                                <span className="truncate rounded-full bg-amber-50 px-3 py-1 text-center text-amber-800 sm:text-left">
+                                  Activity
+                                </span>
+                                <span className="truncate rounded-full bg-emerald-50 px-3 py-1 text-center text-emerald-800 sm:text-left">
+                                  Available
+                                </span>
+                                <span className="truncate rounded-full bg-stone-100 px-3 py-1 text-center text-stone-800 sm:text-left">
+                                  {preselectedDate ? formatDisplayDateValue(preselectedDate) : "Choose date"}
+                                </span>
+                                <span className="truncate rounded-full bg-sky-50 px-3 py-1 text-center text-sky-800 sm:text-left">
+                                  General admission
+                                </span>
+                              </div>
+                              <h3 className="text-xl font-bold leading-snug">
+                                {activity.title}
+                              </h3>
+                              <p className="mt-2 text-sm leading-6 text-stone-600">
+                                {activity.description || "Daily activity booking with general admission tickets."}
+                              </p>
+                              <div className="mt-auto flex items-center justify-between gap-4 pt-5">
+                                <span className="text-2xl font-bold">
+                                  Rs. {activity.booking_price || activity.price}
+                                </span>
+                                <span className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-stone-950 px-4 py-3 text-sm font-bold text-white">
+                                  Select <ArrowRight className="h-4 w-4" />
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </>
                 )}
               </div>
             )}
@@ -1154,7 +1324,10 @@ const BookingContent: React.FC = () => {
                 <div className="sticky bottom-0 z-50 -mx-4 mt-5 border-t border-stone-200 bg-[#f7f3eb]/95 px-4 py-4 shadow-none backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
                   <PrimaryButton
                     disabled={totalTickets === 0}
-                    onClick={() => setStep("details")}
+                    onClick={() => {
+                      if (customerSession) setStep("details");
+                      else requireLoginForSelection();
+                    }}
                   >
                     Continue with {totalTickets} ticket(s)
                   </PrimaryButton>
@@ -1167,47 +1340,20 @@ const BookingContent: React.FC = () => {
                 <div className="rounded-lg bg-white p-5 shadow-sm ring-1 ring-stone-200">
                   <div className="mb-5">
                     <h3 className="text-2xl font-bold text-stone-950">
-                      Guest details
+                      Booking account
                     </h3>
                     <p className="mt-1 text-sm font-medium text-stone-500">
-                      Enter the guest details for this booking.
+                      Tickets will be saved to your logged-in customer account.
                     </p>
                   </div>
-                  <label className="mb-4 block">
-                    <Input
-                      variant="public"
-                      label="Full name"
-                      value={form.name}
-                      onChange={(name) => setForm({ ...form, name })}
-                      placeholder="Guest name"
-                      leftIcon={User}
-                      error={errors.name}
-                    />
-                  </label>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label>
-                      <Input
-                        variant="public"
-                        label="Phone"
-                        type="tel"
-                        value={form.phone}
-                        onChange={(phone) => setForm({ ...form, phone })}
-                        placeholder="+91 98765 43210"
-                        leftIcon={Phone}
-                        error={errors.phone}
-                      />
-                    </label>
-                    <label>
-                      <Input
-                        variant="public"
-                        label="Email optional"
-                        type="email"
-                        value={form.email}
-                        onChange={(email) => setForm({ ...form, email })}
-                        placeholder="name@email.com"
-                        error={errors.email}
-                      />
-                    </label>
+                  <div className="grid gap-3 rounded-lg bg-stone-50 p-4 sm:grid-cols-2">
+                    <Info label="Name" value={customerSession.name || "Customer"} />
+                    <Info label="Mobile" value={customerSession.phone} mono />
+                    {customerSession.email && (
+                      <div className="sm:col-span-2">
+                        <Info label="Email" value={customerSession.email} />
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="fixed inset-x-0 bottom-0 z-50 border-t border-stone-200 bg-white p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] sm:relative sm:inset-auto sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
