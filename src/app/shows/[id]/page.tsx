@@ -20,6 +20,7 @@ import {
   formatDisplayTimeValue,
 } from "@/components/ui/date-utils";
 import { getAvailabilityLabel, getRecordId, isShowBookableAt } from "@/lib/booking";
+import { isShowPubliclyAccessible } from "@/lib/catalogLifecycle";
 import { db } from "@/lib/database";
 import { activityImages } from "@/lib/seedData";
 import { toDisplayTitle } from "@/lib/textFormat";
@@ -31,13 +32,11 @@ type Show = {
   date: string;
   time: string;
   price: number;
-  type?: "KALARI" | "EVENT";
   status: string;
   image?: string;
   description?: string;
   available_count?: number;
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
-  capacity?: number;
 };
 
 const publicShowBookingHref = (show: { id?: string; _id?: string }) => {
@@ -77,7 +76,7 @@ export default function ShowDetailPage() {
     );
   }
 
-  if (!show) {
+  if (!show || !isShowPubliclyAccessible(show)) {
     return (
       <main className="min-h-screen bg-white text-[#10284a]">
         <PublicNavbar />
@@ -124,7 +123,7 @@ export default function ShowDetailPage() {
 
         <div className="self-center">
           <p className="text-sm font-black uppercase tracking-widest text-primary-600">
-            {show.type === "EVENT" ? "Special event" : "Kalari show"}
+            Kalari show
           </p>
           <h1 className="mt-3 text-5xl font-black leading-tight md:text-6xl">
             {toDisplayTitle(show.title)}
@@ -214,7 +213,7 @@ export default function ShowDetailPage() {
                 Admission
               </span>
               <span className="font-black">
-                {show.type === "EVENT" ? "GENERAL" : "RESERVED"}
+                RESERVED
               </span>
             </div>
             <div className="mt-3 flex items-center justify-between gap-4">

@@ -26,6 +26,7 @@ import {
   formatDisplayTimeValue,
 } from "@/components/ui/date-utils";
 import { activityImages } from "@/lib/seedData";
+import { isActivityPubliclyVisible } from "@/lib/activityAvailability";
 import { toDisplayTitle } from "@/lib/textFormat";
 
 type SearchType = "all" | "shows" | "activities";
@@ -38,6 +39,9 @@ type Activity = {
   category: string;
   location: string;
   duration: string;
+  start_date?: string;
+  end_date?: string;
+  status?: string;
   price: number;
   rating?: number;
   review_count?: number;
@@ -55,11 +59,9 @@ type Show = {
   date: string;
   time: string;
   price: number;
-  type: "KALARI" | "EVENT";
   status: string;
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
   available_count?: number;
-  activity_id?: string;
   image?: string;
   description?: string;
 };
@@ -149,16 +151,13 @@ export default function Home() {
       const reviewsPayload = await reviewsResponse?.json().catch(() => null);
 
       setActivities(
-        (activitiesPayload?.data || []).filter(
-          (activity: Activity) =>
-            activity.booking_status !== "PAUSED" &&
-            Number(activity.daily_capacity || 20) > 0,
+        (activitiesPayload?.data || []).filter((activity: Activity) =>
+          isActivityPubliclyVisible(activity),
         ),
       );
       setShows(
         (showsPayload?.data || []).filter(
           (show: Show) =>
-            show.type === "KALARI" &&
             show.status === "ACTIVE" &&
             show.availability_status !== "SOLD_OUT" &&
             Number(show.available_count ?? 1) > 0,
@@ -201,23 +200,18 @@ export default function Home() {
     };
   }, []);
 
-  const activityById = useMemo(
-    () => new Map(activities.map((activity) => [activity.id, activity])),
-    [activities],
-  );
-
   const heroShow = shows[0];
-  const heroActivity = heroShow
-    ? activityById.get(heroShow.activity_id || "")
-    : activities[0];
   const heroImage =
     heroShow?.image ||
-    heroActivity?.image ||
     activities[0]?.image ||
     activityImages.hero;
   const kalariShows = shows.slice(0, 6);
   const activityBookings = activities
-    .filter((activity) => activity.category !== "Kalari Booking")
+    .filter(
+      (activity) =>
+        activity.category !== "Kalari Booking" &&
+        isActivityPubliclyVisible(activity),
+    )
     .slice(0, 6);
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -227,7 +221,7 @@ export default function Home() {
     return shows
       .filter((show) => {
         const matchesSearch =
-          `${show.title} ${show.description || ""} ${show.type} ${show.date} ${show.time}`
+          `${show.title} ${show.description || ""} kalari show ${show.date} ${show.time}`
             .toLowerCase()
             .includes(normalizedSearch);
         const matchesDate = !heroDate || show.date === heroDate;
@@ -241,10 +235,12 @@ export default function Home() {
     if (!normalizedSearch || searchType === "shows") return [];
 
     return activities
-      .filter((activity) =>
-        `${activity.title} ${activity.category} ${activity.location} ${activity.description || ""}`
-          .toLowerCase()
-          .includes(normalizedSearch),
+      .filter(
+        (activity) =>
+          isActivityPubliclyVisible(activity) &&
+          `${activity.title} ${activity.category} ${activity.location} ${activity.description || ""}`
+            .toLowerCase()
+            .includes(normalizedSearch),
       )
       .slice(0, 5);
   }, [activities, normalizedSearch, searchType]);
@@ -358,14 +354,9 @@ export default function Home() {
                                     `suggestion-show-${show.title}-${show.date}`,
                                   )}
                                   href={publicShowDetailHref(show)}
-                                  image={
-                                    show.image ||
-                                    activityById.get(show.activity_id || "")
-                                      ?.image ||
-                                    activityImages.kalari
-                                  }
+                                  image={show.image || activityImages.kalari}
                                   title={toDisplayTitle(show.title)}
-                                  meta={`${show.type === "EVENT" ? "Event" : "Show"} | ${show.date} | ${show.time}`}
+                                  meta={`Show | ${show.date} | ${show.time}`}
                                   action="View"
                                   onSelect={() => setSearchOpen(false)}
                                 />
@@ -436,7 +427,7 @@ export default function Home() {
         {loading ? (
           <SkeletonRail />
         ) : kalariShows.length ? (
-          <ShowCarousel shows={kalariShows} activityById={activityById} />
+          <ShowCarousel shows={kalariShows} />
         ) : (
           <EmptyState text="No Kalari shows are available right now." />
         )}
@@ -549,13 +540,7 @@ const SectionHeader = ({
   </div>
 );
 
-const ShowCarousel = ({
-  shows,
-  activityById,
-}: {
-  shows: Show[];
-  activityById: Map<string, Activity>;
-}) => {
+const ShowCarousel = ({ shows }: { shows: Show[] }) => {
   const [activeIndex, setActiveIndex] = useState(() =>
     shows.length > 2 ? 1 : 0,
   );
@@ -655,11 +640,7 @@ const ShowCarousel = ({
               {show ? (
                 <ShowCard
                   show={show}
-                  image={
-                    show.image ||
-                    activityById.get(show.activity_id || "")?.image ||
-                    activityImages.kalari
-                  }
+                  image={show.image || activityImages.kalari}
                   active={active}
                   onActivate={
                     !active && showIndex !== null

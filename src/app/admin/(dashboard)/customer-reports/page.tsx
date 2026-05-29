@@ -8,7 +8,7 @@ import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { formatDisplayDateValue } from '@/components/ui/date-utils'
 import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
-import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, SearchInput } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, AdminTableSkeleton, SearchInput } from '@/components/ui'
 import {
   UserIcon,
   EnvelopeIcon,
@@ -321,58 +321,50 @@ const CustomerReports: React.FC = () => {
 
       {/* Customer Reports Table */}
       <AdminTablePanel>
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-          </div>
-        ) : filteredAndSortedCustomers.length === 0 ? (
-          <div className="text-center py-12">
-            <DocumentTextIcon className={`mx-auto h-12 w-12 mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
-            <h3 className={`text-lg font-medium mb-2 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-              {searchTerm ? 'No customers found' : 'No customer data available'}
-            </h3>
-            <p className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              {searchTerm ? 'Try adjusting your search terms' : 'Customer reports will appear here once you have bookings'}
-            </p>
-          </div>
-        ) : (
-              <AdminTable>
-                <AdminTableHead>
-                  <tr>
-                    <th 
-                      className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
-                      onClick={() => handleSort('name')}
-                    >
-                      Customer {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
-                    </th>
-                    <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Contact
-                    </th>
-                    <th 
-                      className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
-                      onClick={() => handleSort('totalBookings')}
-                    >
-                      Bookings {sortBy === 'totalBookings' && (sortOrder === 'asc' ? '↑' : '↓')}
-                    </th>
-                    <th 
-                      className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
-                      onClick={() => handleSort('totalSpent')}
-                    >
-                      Revenue {sortBy === 'totalSpent' && (sortOrder === 'asc' ? '↑' : '↓')}
-                    </th>
-                    <th 
-                      className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
-                      onClick={() => handleSort('lastBooking')}
-                    >
-                      Last Booking {sortBy === 'lastBooking' && (sortOrder === 'asc' ? '↑' : '↓')}
-                    </th>
-                    <th className={`px-6 py-3 text-right text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Actions
-                    </th>
-                  </tr>
-                </AdminTableHead>
-                <AdminTableBody>
-                  {filteredAndSortedCustomers.map((customer) => (
+        <AdminTable>
+          <AdminTableHead>
+            <tr>
+              <th 
+                className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
+                onClick={() => handleSort('name')}
+              >
+                Customer {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+              </th>
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Contact
+              </th>
+              <th 
+                className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
+                onClick={() => handleSort('totalBookings')}
+              >
+                Bookings {sortBy === 'totalBookings' && (sortOrder === 'asc' ? '↑' : '↓')}
+              </th>
+              <th 
+                className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
+                onClick={() => handleSort('totalSpent')}
+              >
+                Revenue {sortBy === 'totalSpent' && (sortOrder === 'asc' ? '↑' : '↓')}
+              </th>
+              <th 
+                className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}
+                onClick={() => handleSort('lastBooking')}
+              >
+                Last Booking {sortBy === 'lastBooking' && (sortOrder === 'asc' ? '↑' : '↓')}
+              </th>
+              <th className={`px-6 py-3 text-right text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Actions
+              </th>
+            </tr>
+          </AdminTableHead>
+          <AdminTableBody>
+            {loading ? (
+              <AdminTableSkeleton columns={6} leadColumn="avatar" />
+            ) : filteredAndSortedCustomers.length === 0 ? (
+              <AdminTableEmpty colSpan={6}>
+                {searchTerm ? 'No customers found. Try adjusting your search terms.' : 'No customer data available yet.'}
+              </AdminTableEmpty>
+            ) : (
+              filteredAndSortedCustomers.map((customer) => (
                     <motion.tr
                       key={customer.id}
                       initial={{ opacity: 0 }}
@@ -462,10 +454,10 @@ const CustomerReports: React.FC = () => {
                         </button>
                       </td>
                     </motion.tr>
-                  ))}
-                </AdminTableBody>
-              </AdminTable>
-        )}
+                  ))
+            )}
+          </AdminTableBody>
+        </AdminTable>
       </AdminTablePanel>
     </div>
   )

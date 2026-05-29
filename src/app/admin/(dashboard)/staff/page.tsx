@@ -5,7 +5,7 @@ import { db } from '@/lib/database'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
-import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, SearchInput } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, AdminTableSkeleton, Button, SearchInput } from '@/components/ui'
 import { formatDisplayDateValue } from '@/components/ui/date-utils'
 import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
 import {
@@ -135,8 +135,6 @@ const StaffPage: React.FC = () => {
     s.email.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600"></div></div>
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -252,7 +250,11 @@ const StaffPage: React.FC = () => {
               </tr>
             </AdminTableHead>
             <AdminTableBody>
-              {filteredStaff.map(member => (
+              {loading ? (
+                <AdminTableSkeleton columns={5} leadColumn="avatar" />
+              ) : filteredStaff.length === 0 ? (
+                <AdminTableEmpty colSpan={5}>No team members found.</AdminTableEmpty>
+              ) : filteredStaff.map(member => (
                 <tr key={member.id || (member as any)._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-4">
@@ -303,7 +305,6 @@ const StaffPage: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {filteredStaff.length === 0 && <AdminTableEmpty colSpan={5}>No team members found.</AdminTableEmpty>}
             </AdminTableBody>
           </AdminTable>
         </div>

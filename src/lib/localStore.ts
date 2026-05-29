@@ -1,7 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { assignAgentIds } from "@/lib/agentId";
+import { backfillAgentPublicIdsLocal } from "@/lib/agentIdBackfill";
 import { getSeedData } from "./seedData";
 import { countBookedSeats, getAvailabilityStatus, getShowCapacity, isShowBookableAt } from "./booking";
+import { syncActivityStatusesLocal, syncShowStatusesLocal } from "./catalogLifecycle";
 
 type Store = Record<string, any[]>;
 
@@ -16,7 +19,19 @@ const initialStore = (): Store => {
       { id: "user-staff", email: "staff@kalari.local", password: "staff123", role: "staff", full_name: "Kalari Staff", active: true, created_at: now },
     ],
     agents: [
-      { id: "agent-local", name: "Booking Agent", phone: "+91 98765 43210", payout_frequency: "MONTHLY", active: true, created_at: now, updated_at: now },
+      {
+        id: "AGT-0001",
+        agent_code: "AGT-0001",
+        name: "Booking Agent",
+        phone: "+91 98765 43210",
+        email: "",
+        commission_notification_method: "SMS",
+        remaining_amount_notification_method: "SMS",
+        payout_frequency: "MONTHLY",
+        active: true,
+        created_at: now,
+        updated_at: now,
+      },
     ],
     activities: seed.activities,
     shows: seed.shows,
@@ -134,6 +149,18 @@ export const localQuery = async ({
   const store = await readStore();
   store[collection] = store[collection] || [];
 
+  const resolvedFilters = filters || {};
+
+  if (collection === "agents" && operation === "select") {
+    const result = await backfillAgentPublicIdsLocal(store);
+    if (result.updated > 0) await writeStore(store);
+  }
+
+  if (operation === "select") {
+    if (collection === "shows" && syncShowStatusesLocal(store)) await writeStore(store);
+    if (collection === "activities" && syncActivityStatusesLocal(store)) await writeStore(store);
+  }
+
   if (operation === "insert") {
     if (collection === "bookings") {
       const showById = new Map((store.shows || []).map((show) => [String(recordId(show)), show]));
@@ -143,10 +170,19 @@ export const localQuery = async ({
       });
       if (closedShow) throw new Error("Booking is closed because this show time has passed.");
     }
-    const rows = (insertPayload || []).map((row: any) => ({
-      id: row.id || `${collection}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      ...row,
-    }));
+    const rows = (() => {
+      const payload = insertPayload || [];
+      if (collection === "agents") {
+        return assignAgentIds(store.agents || [], payload).map((row: any) => ({
+          ...row,
+          id: row.id || `${collection}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }));
+      }
+      return payload.map((row: any) => ({
+        id: row.id || `${collection}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ...row,
+      }));
+    })();
     store[collection].push(...rows);
     await writeStore(store);
     return rows;
@@ -155,7 +191,7 @@ export const localQuery = async ({
   if (operation === "update") {
     let modifiedCount = 0;
     store[collection] = store[collection].map((row) => {
-      if (!matchesFilters(row, filters)) return row;
+      if (!matchesFilters(row, resolvedFilters)) return row;
       modifiedCount += 1;
       return { ...row, ...(updatePayload || {}) };
     });
@@ -165,12 +201,12 @@ export const localQuery = async ({
 
   if (operation === "delete") {
     const before = store[collection].length;
-    store[collection] = store[collection].filter((row) => !matchesFilters(row, filters));
+    store[collection] = store[collection].filter((row) => !matchesFilters(row, resolvedFilters));
     await writeStore(store);
     return { acknowledged: true, deletedCount: before - store[collection].length };
   }
 
-  let rows = store[collection].filter((row) => matchesFilters(row, filters, inFilters, rangeFilters));
+  let rows = store[collection].filter((row) => matchesFilters(row, resolvedFilters, inFilters, rangeFilters));
   if (orderBy?.column) {
     rows = rows.sort((a, b) => {
       const left = getValue(a, orderBy.column);

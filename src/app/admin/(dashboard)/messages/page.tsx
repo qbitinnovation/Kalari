@@ -13,6 +13,7 @@ import {
   AdminTableHeaderCell,
   AdminTablePanel,
   AdminTableRow,
+  AdminTableSkeleton,
   Button,
   SearchInput,
   Select,
@@ -116,7 +117,7 @@ export default function MessagesPage() {
           </AdminTableHead>
           <AdminTableBody>
             {loading ? (
-              <AdminTableEmpty colSpan={5}>Loading messages...</AdminTableEmpty>
+              <AdminTableSkeleton columns={5} leadColumn="avatar" />
             ) : filtered.length === 0 ? (
               <AdminTableEmpty colSpan={5}>No messages to display.</AdminTableEmpty>
             ) : (

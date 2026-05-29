@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react'
-import { db, Show, Customer, type Agent, type Activity } from '@/lib/database'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { db, Show, Customer, type Activity } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logBookingCreation } from '@/utils/activityLogger'
 import { createBookingReference, createTicketCodes, getBookingReference, getRecordId, isActiveBookingReservation, isShowBookableAt, parseSeatCodes } from '@/lib/booking'
-import { calculateEventCommission, getAgentDisplayName, getCommissionPeriodKey } from '@/lib/agentCommission'
+import { resolveShowStatus } from '@/lib/catalogLifecycle'
+import { isActivityPubliclyBookable } from '@/lib/activityAvailability'
 import {
   ARENA_TOP_LABEL,
   arrowForArenaSide,
@@ -16,7 +19,7 @@ import {
   sideLabelForArenaSide,
   type ArenaSide,
 } from '@/lib/arenaLayout'
-import { CalendarDays, Clock, IndianRupee, Printer, Ticket, X } from 'lucide-react'
+import { CalendarDays, Clock, IndianRupee, Printer, Ticket, X, ArrowLeft } from 'lucide-react'
 import {
   AdminTable,
   AdminTableBody,
@@ -28,11 +31,20 @@ import {
   AdminTableRow,
   Button,
   DatePicker,
+  IndianPhoneField,
   Input,
   SearchInput,
   Select,
 } from '@/components/ui'
 import { formatDisplayDateValue, todayDateValue } from '@/components/ui/date-utils'
+import {
+  getBookingCustomerErrors,
+  getBookingEmailError,
+  getBookingNameError,
+  getBookingPhoneError,
+  hasBookingCustomerErrors,
+  normalizeBookingPhone,
+} from '@/lib/bookingCustomer'
 import { toDisplayTitle } from '@/lib/textFormat'
 
 interface SeatData {
@@ -51,6 +63,14 @@ type BookingMode = 'SHOW' | 'ACTIVITY'
 type BookingTypeFilter = 'ALL' | BookingMode
 
 const Booking: React.FC = () => {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const deepLinkShowId = searchParams.get('showId') || ''
+  const deepLinkActivityId = searchParams.get('activityId') || ''
+  const deepLinkDate = searchParams.get('date') || ''
+  const catalogHidden = Boolean(deepLinkShowId || deepLinkActivityId)
+  const deepLinkHandled = useRef(false)
+
   const [bookingMode, setBookingMode] = useState<BookingMode>('SHOW')
   const [bookingTypeFilter, setBookingTypeFilter] = useState<BookingTypeFilter>('ALL')
   const [bookingSearch, setBookingSearch] = useState('')
@@ -64,7 +84,6 @@ const Booking: React.FC = () => {
   const [activityAvailability, setActivityAvailability] = useState<Record<string, number>>({})
   const [seats, setSeats] = useState<SeatData[]>([])
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
-  const [eventTicketCount, setEventTicketCount] = useState(1)
   const [loading, setLoading] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
   const [bookingDetailOpen, setBookingDetailOpen] = useState(false)
@@ -74,14 +93,22 @@ const Booking: React.FC = () => {
   const [submittingCustomer, setSubmittingCustomer] = useState(false)
   const [checkoutCustomerPhone, setCheckoutCustomerPhone] = useState('')
   const [checkoutCustomerName, setCheckoutCustomerName] = useState('')
+  const [checkoutCustomerEmail, setCheckoutCustomerEmail] = useState('')
   const [checkoutCustomerError, setCheckoutCustomerError] = useState('')
-  const [agents, setAgents] = useState<Agent[]>([])
+  const [checkoutFieldErrors, setCheckoutFieldErrors] = useState({ name: '', phone: '', email: '' })
+  const [catalogReady, setCatalogReady] = useState(false)
   const darkMode = useDarkMode()
 
   useEffect(() => {
-    fetchActiveShows()
-    fetchActivities()
-    fetchAgents()
+    let cancelled = false
+    async function initCatalog() {
+      await Promise.all([fetchActiveShows(), fetchActivities()])
+      if (!cancelled) setCatalogReady(true)
+    }
+    initCatalog()
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -89,7 +116,6 @@ const Booking: React.FC = () => {
     if (selectedShow) {
       fetchSeatsForShow(recordId(selectedShow))
       setSelectedSeats([])
-      setEventTicketCount(1)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShow])
@@ -157,7 +183,6 @@ const Booking: React.FC = () => {
       
       const updatedShows = await checkAndUpdateShowStatuses(data || [])
       const activeShows = updatedShows.filter(show =>
-        show.type !== 'EVENT' &&
         show.status === 'ACTIVE' &&
         isShowBookableAt(show) &&
         show.availability_status !== 'SOLD_OUT' &&
@@ -171,40 +196,19 @@ const Booking: React.FC = () => {
     }
   }
 
-  const fetchAgents = async () => {
-    try {
-      const { data, error } = await db
-        .from('agents')
-        .select('*')
-        .eq('active', true)
-        .order('name')
-      if (error) throw error
-      setAgents(data || [])
-    } catch (error) {
-      console.error('Error fetching agents:', error)
-    }
-  }
-
   const checkAndUpdateShowStatuses = async (shows: Show[]) => {
     const updatedShows = []
     for (const show of shows) {
       let updatedShow = { ...show }
-      const showDateTime = new Date(`${show.date}T${show.time}`)
-      const now = new Date()
-      const thirtyMinutesAfterShow = new Date(showDateTime.getTime() + 30 * 60 * 1000)
-
-      if (now > thirtyMinutesAfterShow && show.status !== 'SHOW_DONE') {
+      const nextStatus = resolveShowStatus(show)
+      if (nextStatus !== show.status) {
         try {
-          await db.from('shows').update({ status: 'SHOW_DONE' }).eq('id', recordId(show))
-          await db.from('tickets').update({ status: 'COMPLETED' }).eq('show_id', recordId(show)).in('status', ['ACTIVE'])
+          await db.from('shows').update({ status: nextStatus }).eq('id', recordId(show))
+          if (nextStatus === 'SHOW_DONE') {
+            await db.from('tickets').update({ status: 'COMPLETED' }).eq('show_id', recordId(show)).in('status', ['ACTIVE'])
+          }
         } catch (error) { console.error(error) }
-        updatedShow.status = 'SHOW_DONE'
-      } 
-      else if (now > showDateTime && now <= thirtyMinutesAfterShow && show.status === 'ACTIVE') {
-        try {
-          await db.from('shows').update({ status: 'SHOW_STARTED' }).eq('id', recordId(show))
-        } catch (error) { console.error(error) }
-        updatedShow.status = 'SHOW_STARTED'
+        updatedShow.status = nextStatus as Show['status']
       }
       updatedShows.push(updatedShow)
     }
@@ -238,10 +242,6 @@ const Booking: React.FC = () => {
     setLoading(true)
     try {
       const show = shows.find(s => recordId(s) === showId)
-      if (show?.type === 'EVENT') {
-        setSeats([])
-        return
-      }
       if (!show?.layout) {
         setSeats([])
         return
@@ -304,7 +304,7 @@ const Booking: React.FC = () => {
 
   const getTicketQuantity = () => {
     if (bookingMode === 'ACTIVITY') return activityTicketCount
-    return selectedShow?.type === 'EVENT' ? eventTicketCount : selectedSeats.length
+    return selectedSeats.length
   }
 
   const getTotalAmount = () => {
@@ -328,6 +328,7 @@ const Booking: React.FC = () => {
         return
       }
       setCheckoutCustomerError('')
+      setCheckoutFieldErrors({ name: '', phone: '', email: '' })
       setBookingDetailOpen(false)
       setShowCustomerModal(true)
       return
@@ -353,8 +354,7 @@ const Booking: React.FC = () => {
         .order('title')
       if (error) throw error
       setActivities((data || []).filter((activity: Activity) =>
-        activity.booking_status !== 'PAUSED' &&
-        Number(activity.daily_capacity || 20) > 0
+        isActivityPubliclyBookable(activity),
       ))
     } catch (error) {
       console.error('Error fetching activities:', error)
@@ -372,44 +372,42 @@ const Booking: React.FC = () => {
     }
   }
 
-  const getIndianMobileDigits = (value: string) => {
-    const digits = value.replace(/\D/g, '')
-    return digits.startsWith('91') && digits.length > 10 ? digits.slice(2) : digits
+  const validateCheckoutCustomer = () => {
+    const nextErrors = getBookingCustomerErrors({
+      name: checkoutCustomerName,
+      phone: checkoutCustomerPhone,
+      email: checkoutCustomerEmail,
+    })
+    setCheckoutFieldErrors(nextErrors)
+    return !hasBookingCustomerErrors(nextErrors)
   }
-
-  const isValidIndianMobile = (value: string) => /^[6-9]\d{9}$/.test(getIndianMobileDigits(value))
-
-  const normalizeIndianMobile = (value: string) => {
-    const mobile = getIndianMobileDigits(value)
-    if (!/^[6-9]\d{9}$/.test(mobile)) {
-      throw new Error('Enter a valid 10-digit Indian mobile number with +91 code.')
-    }
-    return `+91${mobile}`
-  }
-
-  const handleCheckoutPhoneChange = (value: string) => {
-    const digits = value.replace(/\D/g, '')
-    if (value.length > 20 || digits.length > 12) return
-    setCheckoutCustomerPhone(value)
-    setCheckoutCustomerError('')
-  }
-
-  const phoneValidationError = checkoutCustomerPhone.trim() && !isValidIndianMobile(checkoutCustomerPhone)
-    ? 'Enter a valid 10-digit Indian mobile number with +91 code.'
-    : ''
 
   const findOrCreateCheckoutCustomer = async () => {
-    const phone = normalizeIndianMobile(checkoutCustomerPhone)
+    if (!validateCheckoutCustomer()) {
+      throw new Error('Enter the customer name and a valid mobile number.')
+    }
+
+    const name = checkoutCustomerName.trim()
+    const phone = normalizeBookingPhone(checkoutCustomerPhone)
+    const email = checkoutCustomerEmail.trim()
 
     const { data: existingCustomers, error: existingError } = await db.from('customers').select('*').eq('phone', phone)
     if (existingError) throw new Error(existingError.message || 'Could not check customer mobile number.')
-    if (existingCustomers?.[0]) return existingCustomers[0] as Customer
+    if (existingCustomers?.[0]) {
+      const existing = existingCustomers[0] as Customer
+      if (name !== existing.name || email !== (existing.email || '')) {
+        const now = new Date().toISOString()
+        await db.from('customers').update({ name, email, updated_at: now }).eq('id', recordId(existing))
+        return { ...existing, name, email } as Customer
+      }
+      return existing
+    }
 
     const now = new Date().toISOString()
     const { data: customers, error } = await db.from('customers').insert([{
-      name: checkoutCustomerName.trim() || 'Walk-in Customer',
+      name,
       phone,
-      email: '',
+      email,
       created_at: now,
       updated_at: now,
     }]).select()
@@ -427,33 +425,16 @@ const Booking: React.FC = () => {
       setLoading(true)
       const { data: existingBookings } = await db.from('bookings').select('seat_code').eq('show_id', recordId(selectedShow)).in('status', ['CONFIRMED', 'HELD'])
       const activeBookings = existingBookings?.filter(isActiveBookingReservation) || []
-      if (selectedShow.type === 'EVENT') {
-        const bookedCount = activeBookings.reduce((count: number, booking: any) => count + parseSeatCodes(booking.seat_code).length, 0)
-        const capacity = Number(selectedShow.capacity || 0)
-        if (capacity > 0 && bookedCount + eventTicketCount > capacity) {
-          alert(`Only ${Math.max(0, capacity - bookedCount)} tickets left. Please reduce the ticket count.`)
-          return
-        }
-      } else {
-        const allBookedSeats = activeBookings.flatMap(booking => {
-          return parseSeatCodes(booking.seat_code)
-        })
-        const conflictingSeats = selectedSeats.filter(seat => allBookedSeats.includes(seat))
-        if (conflictingSeats.length > 0) {
-          alert(`Some seats are already booked. Please refresh and try again.`)
-          fetchSeatsForShow(recordId(selectedShow))
-          return
-        }
+      const allBookedSeats = activeBookings.flatMap(booking => parseSeatCodes(booking.seat_code))
+      const conflictingSeats = selectedSeats.filter(seat => allBookedSeats.includes(seat))
+      if (conflictingSeats.length > 0) {
+        alert(`Some seats are already booked. Please refresh and try again.`)
+        fetchSeatsForShow(recordId(selectedShow))
+        return
       }
 
-      const linkedAgentId = selectedShow.type === 'EVENT' ? selectedShow.agent_id || '' : ''
-      const agent = agents.find(a => recordId(a) === linkedAgentId)
-      const commissionPercentage = linkedAgentId ? Number((selectedShow as any).agent_commission_percentage || 0) : 0
-      const commissionAmount = linkedAgentId ? calculateEventCommission(getTotalAmount(), commissionPercentage) : 0
       const bookingReference = createBookingReference()
-      const seatCodesToSave = selectedShow.type === 'EVENT'
-        ? Array.from({ length: eventTicketCount }).map(() => 'GENERAL')
-        : selectedSeats
+      const seatCodesToSave = selectedSeats
       const generatedTicketCodes = createTicketCodes(seatCodesToSave.length)
 
       const bookingToInsert = {
@@ -462,11 +443,11 @@ const Booking: React.FC = () => {
         seat_code: JSON.stringify(seatCodesToSave),
         booked_by: customer.name,
         customer_id: recordId(customer),
-        agent_id: linkedAgentId || null,
-        agent_commission_percentage: commissionPercentage,
-        commission_amount: commissionAmount,
-        commission_status: commissionAmount > 0 ? 'UNPAID' : 'PAID',
-        commission_period_key: commissionAmount > 0 ? getCommissionPeriodKey(new Date(), agent?.payout_frequency || 'DAILY') : null,
+        agent_id: null,
+        agent_commission_percentage: 0,
+        commission_amount: 0,
+        commission_status: 'PAID',
+        commission_period_key: null,
         payment_method: 'COUNTER',
         payment_status: 'PAID',
         total_amount: getTotalAmount(),
@@ -506,7 +487,7 @@ const Booking: React.FC = () => {
 
       const { data: { user } } = await db.auth.getUser()
       await logBookingCreation(bookingId, selectedShow.title, user?.email || 'unknown', {
-        booking_reference: getBookingReference(booking), seat_codes: seatCodesToSave, total_price: getTotalAmount(), agent_name: agent ? getAgentDisplayName(agent) : undefined
+        booking_reference: getBookingReference(booking), seat_codes: seatCodesToSave, total_price: getTotalAmount()
       })
 
       setBookingResult({ bookings, tickets, success: true, totalAmount: getTotalAmount() })
@@ -514,15 +495,20 @@ const Booking: React.FC = () => {
       setShowCustomerModal(false)
       setCheckoutCustomerPhone('')
       setCheckoutCustomerName('')
+      setCheckoutCustomerEmail('')
+      setCheckoutFieldErrors({ name: '', phone: '', email: '' })
       setSelectedSeats([])
-      setEventTicketCount(1)
-      if (selectedShow.type === 'KALARI') fetchSeatsForShow(recordId(selectedShow))
+      fetchSeatsForShow(recordId(selectedShow))
     } catch (error: any) { alert(`Error: ${error.message}`) } finally { setLoading(false) }
   }
 
   const handleBookActivity = async () => {
     if (!selectedActivity || activityTicketCount < 1) return
-    const phone = normalizeIndianMobile(checkoutCustomerPhone)
+    if (!validateCheckoutCustomer()) {
+      throw new Error('Enter the customer name and a valid mobile number.')
+    }
+
+    const phone = normalizeBookingPhone(checkoutCustomerPhone)
     const date = selectedDate || todayDateValue()
     const response = await fetch('/api/activity-bookings', {
       method: 'POST',
@@ -533,8 +519,9 @@ const Booking: React.FC = () => {
         ticketCount: activityTicketCount,
         paymentMethod: 'COUNTER',
         customer: {
-          name: checkoutCustomerName.trim() || 'Walk-in Customer',
+          name: checkoutCustomerName.trim(),
           phone,
+          email: checkoutCustomerEmail.trim(),
         },
       }),
     })
@@ -583,7 +570,7 @@ const Booking: React.FC = () => {
     const reference = getBookingReference(booking)
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(reference)}`
     const title = toDisplayTitle(getSelectedTitle() || booking.activity?.title || booking.show?.title || 'Booking')
-    const admission = bookingMode === 'ACTIVITY' || selectedShow?.type === 'EVENT' ? 'GENERAL' : 'Reserved seats'
+    const admission = bookingMode === 'ACTIVITY' ? 'GENERAL' : 'Reserved seats'
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
 
@@ -795,26 +782,80 @@ const Booking: React.FC = () => {
       })
   }, [activities, activityAvailability, bookingSearch, bookingTypeFilter, selectedDate, shows])
 
-  const selectBookingRow = (row: typeof bookingRows[number]) => {
-    if (row.type === 'SHOW') {
-      setBookingMode('SHOW')
-      setSelectedShow(row.source as Show)
-      setSelectedActivity(null)
-      setActivityTicketCount(1)
-      setActivityRemaining(null)
-      setBookingDetailOpen(true)
-      return
-    }
-    const activity = row.source as Activity
+  const openShowBooking = (show: Show) => {
+    setBookingMode('SHOW')
+    setSelectedShow(show)
+    setSelectedActivity(null)
+    setActivityTicketCount(1)
+    setActivityRemaining(null)
+    setBookingDetailOpen(true)
+  }
+
+  const openActivityBooking = (activity: Activity, date?: string) => {
+    const bookingDate = date || selectedDate || todayDateValue()
     setBookingMode('ACTIVITY')
     setSelectedActivity(activity)
     setSelectedShow(null)
     setSelectedSeats([])
-    setEventTicketCount(1)
     setActivityTicketCount(1)
     setActivityRemaining(Number(activityAvailability[recordId(activity)] ?? activity.daily_capacity ?? 20))
-    if (!selectedDate) setSelectedDate(todayDateValue())
+    setSelectedDate(bookingDate)
     setBookingDetailOpen(true)
+  }
+
+  const closeBookingDetail = () => {
+    setBookingDetailOpen(false)
+    if (catalogHidden) router.replace('/admin/booking')
+  }
+
+  useEffect(() => {
+    if (!catalogReady || deepLinkHandled.current) return
+
+    async function applyDeepLink() {
+      if (deepLinkDate) setSelectedDate(deepLinkDate)
+
+      if (deepLinkShowId) {
+        let show =
+          allShows.find((item) => recordId(item) === deepLinkShowId) ||
+          shows.find((item) => recordId(item) === deepLinkShowId)
+        if (!show) {
+          const { data } = await db
+            .from('shows')
+            .select('*, layout:layouts(*)')
+            .eq('id', deepLinkShowId)
+            .single()
+          show = data || undefined
+        }
+        if (show) {
+          openShowBooking(show)
+          deepLinkHandled.current = true
+        }
+        return
+      }
+
+      if (deepLinkActivityId) {
+        let activity = activities.find((item) => recordId(item) === deepLinkActivityId)
+        if (!activity) {
+          const { data } = await db.from('activities').select('*').eq('id', deepLinkActivityId).single()
+          activity = data || undefined
+        }
+        if (activity) {
+          openActivityBooking(activity, deepLinkDate || todayDateValue())
+          deepLinkHandled.current = true
+        }
+      }
+    }
+
+    applyDeepLink()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogReady, deepLinkShowId, deepLinkActivityId, deepLinkDate, allShows, shows, activities])
+
+  const selectBookingRow = (row: typeof bookingRows[number]) => {
+    if (row.type === 'SHOW') {
+      openShowBooking(row.source as Show)
+      return
+    }
+    openActivityBooking(row.source as Activity, selectedDate || todayDateValue())
   }
 
   const selectedName = selectedActivity?.title || selectedShow?.title
@@ -823,38 +864,59 @@ const Booking: React.FC = () => {
     <div className={darkMode ? 'text-slate-100' : 'text-slate-900'}>
       <div className="w-full space-y-6">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <h1 className="text-4xl font-black tracking-tight">Book Tickets</h1>
-          <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto xl:items-center">
-            <SearchInput
-              value={bookingSearch}
-              onChange={setBookingSearch}
-              placeholder="Search shows or activities..."
-              containerClassName="w-full sm:min-w-[320px] xl:w-96"
-            />
-            <Select
-              value={bookingTypeFilter}
-              onChange={(value) => setBookingTypeFilter(value as BookingTypeFilter)}
-              options={[
-                { value: 'ALL', label: 'All Types' },
-                { value: 'SHOW', label: 'Shows' },
-                { value: 'ACTIVITY', label: 'Activities' },
-              ]}
-              className="w-full sm:w-48"
-            />
-            <DatePicker
-              value={selectedDate}
-              onChange={setSelectedDate}
-              placeholder="All dates"
-              minDate={bookingTypeFilter === 'ACTIVITY' ? todayDateValue() : undefined}
-              presets={[
-                { label: 'Today', value: 'today' },
-                { label: 'Clear', value: 'clear' },
-              ]}
-              className="w-full sm:w-48"
-            />
-          </div>
+          {catalogHidden ? (
+            <div className="flex items-center gap-4">
+              <Link
+                href={deepLinkShowId ? '/admin/shows' : '/admin/activities'}
+                className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition-colors ${darkMode ? 'border-slate-800 bg-slate-900 hover:bg-slate-800' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {deepLinkShowId ? 'Back to Shows' : 'Back to Activities'}
+              </Link>
+              <div>
+                <h1 className="text-3xl font-black tracking-tight">Counter Booking</h1>
+                {selectedName && (
+                  <p className="mt-1 text-sm font-semibold opacity-60">{toDisplayTitle(selectedName)}</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              <h1 className="text-4xl font-black tracking-tight">Counter Booking</h1>
+              <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto xl:items-center">
+                <SearchInput
+                  value={bookingSearch}
+                  onChange={setBookingSearch}
+                  placeholder="Search shows or activities..."
+                  containerClassName="w-full sm:min-w-[320px] xl:w-96"
+                />
+                <Select
+                  value={bookingTypeFilter}
+                  onChange={(value) => setBookingTypeFilter(value as BookingTypeFilter)}
+                  options={[
+                    { value: 'ALL', label: 'All Types' },
+                    { value: 'SHOW', label: 'Shows' },
+                    { value: 'ACTIVITY', label: 'Activities' },
+                  ]}
+                  className="w-full sm:w-48"
+                />
+                <DatePicker
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                  placeholder="All dates"
+                  minDate={bookingTypeFilter === 'ACTIVITY' ? todayDateValue() : undefined}
+                  presets={[
+                    { label: 'Today', value: 'today' },
+                    { label: 'Clear', value: 'clear' },
+                  ]}
+                  className="w-full sm:w-48"
+                />
+              </div>
+            </>
+          )}
         </header>
 
+        {!catalogHidden && (
         <section className="space-y-6">
           <AdminTablePanel>
             <AdminTable>
@@ -916,12 +978,13 @@ const Booking: React.FC = () => {
           </AdminTablePanel>
 
         </section>
+        )}
 
         {bookingDetailOpen && (selectedActivity || selectedShow) && (
           <div
             className="admin-modal-overlay"
             onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setBookingDetailOpen(false)
+              if (event.target === event.currentTarget) closeBookingDetail()
             }}
           >
             <motion.div
@@ -940,7 +1003,7 @@ const Booking: React.FC = () => {
                       : selectedShow ? `${formatDisplayDateValue(selectedShow.date)} - ${selectedShow.time || 'Time not set'}` : 'Select tickets'}
                   </p>
                 </div>
-                <button type="button" onClick={() => setBookingDetailOpen(false)} className="admin-modal-close" aria-label="Close booking details">
+                <button type="button" onClick={closeBookingDetail} className="admin-modal-close" aria-label="Close booking details">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1046,22 +1109,6 @@ const Booking: React.FC = () => {
                 <div className="overflow-x-auto pb-8">
                   {loading ? (
                     <div className="h-96 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div></div>
-                  ) : selectedShow.type === 'EVENT' ? (
-                    <div className={`rounded-2xl border p-6 ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
-                      <div className="mb-5">
-                        <h3 className="text-xl font-black">General admission tickets</h3>
-                        <p className="mt-1 text-sm font-bold opacity-50">No seat selection is needed for this event. Select the number of tickets to issue.</p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <button onClick={() => setEventTicketCount(Math.max(1, eventTicketCount - 1))} className={`flex h-12 w-12 items-center justify-center rounded-xl border text-xl font-black ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>-</button>
-                        <div className="min-w-24 text-center">
-                          <div className="text-3xl font-black text-amber-600">{eventTicketCount}</div>
-                          <div className="text-[10px] font-black uppercase tracking-widest opacity-40">Tickets</div>
-                        </div>
-                        <button onClick={() => setEventTicketCount(Math.min(Number(selectedShow.capacity || 9999), eventTicketCount + 1))} className={`flex h-12 w-12 items-center justify-center rounded-xl border text-xl font-black ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>+</button>
-                      </div>
-                      <div className="mt-5 text-sm font-bold opacity-60">Ticket limit: {selectedShow.capacity || 'Unlimited'}</div>
-                    </div>
                   ) : renderRectangularSeatMap()}
                 </div>
               </div>
@@ -1104,24 +1151,45 @@ const Booking: React.FC = () => {
                      <p className="mt-1 text-sm font-bold opacity-50">Existing customers are reused by mobile number. New mobile numbers create a customer record for this booking.</p>
                    </div>
                    <div className="space-y-4">
-                     <Input
+                     <IndianPhoneField
                        label="Mobile Number"
-                       type="tel"
                        value={checkoutCustomerPhone}
-                       onChange={handleCheckoutPhoneChange}
-                       placeholder="+91 98765 43210"
-                       inputMode="tel"
-                       autoComplete="tel"
-                       maxLength={20}
-                       pattern="^(\\+91[\\s-]?)?[6-9][0-9]{9}$"
+                       onChange={(value) => {
+                         setCheckoutCustomerPhone(value)
+                         setCheckoutCustomerError('')
+                         if (checkoutFieldErrors.phone) {
+                           setCheckoutFieldErrors((current) => ({ ...current, phone: getBookingPhoneError(value, true) }))
+                         }
+                       }}
                        required
-                       error={checkoutCustomerError || phoneValidationError}
+                       error={checkoutFieldErrors.phone}
                      />
                      <Input
-                       label="Customer Name (optional for new mobile)"
+                       label="Customer Name"
                        value={checkoutCustomerName}
-                       onChange={setCheckoutCustomerName}
-                       placeholder="Walk-in Customer"
+                       onChange={(value) => {
+                         setCheckoutCustomerName(value)
+                         setCheckoutCustomerError('')
+                         if (checkoutFieldErrors.name) {
+                           setCheckoutFieldErrors((current) => ({ ...current, name: getBookingNameError(value) }))
+                         }
+                       }}
+                       placeholder="Enter customer name"
+                       required
+                       error={checkoutFieldErrors.name}
+                     />
+                     <Input
+                       label="Email (optional)"
+                       type="email"
+                       value={checkoutCustomerEmail}
+                       onChange={(value) => {
+                         setCheckoutCustomerEmail(value)
+                         if (checkoutFieldErrors.email) {
+                           setCheckoutFieldErrors((current) => ({ ...current, email: getBookingEmailError(value) }))
+                         }
+                       }}
+                       placeholder="customer@example.com"
+                       error={checkoutFieldErrors.email}
                      />
                    </div>
                  </div>
@@ -1132,7 +1200,7 @@ const Booking: React.FC = () => {
                    <div className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4">Summary</div>
                    <div className="space-y-2">
                      <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">{bookingMode === 'ACTIVITY' ? 'Activity:' : 'Show:'}</span><span className="text-right">{toDisplayTitle(getSelectedTitle())}</span></div>
-                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Admission:</span><span>{bookingMode === 'ACTIVITY' || selectedShow?.type === 'EVENT' ? 'GENERAL' : 'Seats'}</span></div>
+                     <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Admission:</span><span>{bookingMode === 'ACTIVITY' ? 'GENERAL' : 'Seats'}</span></div>
                      <div className="flex justify-between gap-4 text-sm font-bold"><span className="opacity-60">Tickets:</span><span>{getTicketQuantity()}</span></div>
                      <div className="flex justify-between font-bold"><span>Total:</span><span>Rs. {getTotalAmount()}</span></div>
                    </div>
@@ -1140,13 +1208,18 @@ const Booking: React.FC = () => {
 
                </div>
              </div>
+             {checkoutCustomerError && (
+               <div className="mx-6 mb-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                 {checkoutCustomerError}
+               </div>
+             )}
              <div className="admin-modal-footer">
                <Button type="button" variant="secondary" onClick={() => setShowCustomerModal(false)}>
                  Cancel
                </Button>
                <Button
                  onClick={handleCustomerCheckout}
-                 disabled={!checkoutCustomerPhone.trim() || !!phoneValidationError || loading || submittingCustomer}
+                 disabled={loading || submittingCustomer}
                >
                  {loading || submittingCustomer ? 'Processing...' : 'Confirm & Generate Tickets'}
                </Button>
@@ -1199,7 +1272,7 @@ const Booking: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-xs font-black uppercase tracking-widest text-slate-400">Admission</p>
-                    <p className="mt-2 text-lg font-black">{bookingMode === 'ACTIVITY' || selectedShow?.type === 'EVENT' ? 'GENERAL' : 'Reserved seats'}</p>
+                    <p className="mt-2 text-lg font-black">{bookingMode === 'ACTIVITY' ? 'GENERAL' : 'Reserved seats'}</p>
                   </div>
                 </div>
               </div>

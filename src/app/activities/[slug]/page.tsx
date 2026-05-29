@@ -7,6 +7,12 @@ import { ArrowRight, CheckCircle2, Clock, MapPin, ShieldCheck, Star, Ticket } fr
 import PublicNavbar from "@/components/PublicNavbar";
 import { PublicFooter } from "@/components/PublicFooter";
 import { toDisplayTitle } from "@/lib/textFormat";
+import {
+  formatActivityDateRange,
+  getActivityLifecycleStatus,
+  isActivityPubliclyBookable,
+  isActivityPubliclyVisible,
+} from "@/lib/activityAvailability";
 
 type Activity = any;
 
@@ -42,7 +48,7 @@ export default function ActivityDetailPage() {
     );
   }
 
-  if (!activity) {
+  if (!activity || !isActivityPubliclyVisible(activity)) {
     return (
       <main className="min-h-screen bg-white text-[#10284a]">
         <PublicNavbar />
@@ -54,7 +60,11 @@ export default function ActivityDetailPage() {
     );
   }
 
-  const canBookActivity = activity.booking_status !== "PAUSED" && Number(activity.daily_capacity || 20) > 0;
+  const lifecycle = getActivityLifecycleStatus(activity);
+  const canBookActivity = isActivityPubliclyBookable(activity);
+  const dateLabel =
+    formatActivityDateRange(activity) ||
+    toDisplayTitle(activity.duration || "Flexible dates");
   const activityRouteId = publicActivityRouteId(activity);
   const bookingHref = selectedDate
     ? `/activities/${encodeURIComponent(activityRouteId)}/book?date=${encodeURIComponent(selectedDate)}`
@@ -72,7 +82,7 @@ export default function ActivityDetailPage() {
           <h1 className="mt-3 text-5xl font-black leading-tight">{toDisplayTitle(activity.title)}</h1>
           <div className="mt-5 flex flex-wrap gap-4 text-base font-bold text-slate-600">
             <span className="inline-flex items-center gap-1"><Star className="h-5 w-5 fill-[#ffb800] text-[#ffb800]" /> {activity.rating} ({activity.review_count} reviews)</span>
-            <span className="inline-flex items-center gap-1"><Clock className="h-5 w-5" /> {toDisplayTitle(activity.duration)}</span>
+            <span className="inline-flex items-center gap-1"><Clock className="h-5 w-5" /> {dateLabel}</span>
             <span className="inline-flex items-center gap-1"><MapPin className="h-5 w-5" /> {toDisplayTitle(activity.location)}</span>
           </div>
           <p className="mt-6 text-lg font-medium leading-8 text-slate-700">{toDisplayTitle(activity.description)}</p>
@@ -88,10 +98,17 @@ export default function ActivityDetailPage() {
                 <p className="text-4xl font-black">Rs. {activity.price}</p>
               </div>
               {canBookActivity ? (
-                <Link href={bookingHref} className="btn-gradient-primary inline-flex items-center gap-2 rounded-full px-7 py-4 font-black text-white shadow-lg shadow-primary-900/15">
-                  Book Now
-                  <ArrowRight className="h-5 w-5" />
-                </Link>
+                <div className="text-right">
+                  {lifecycle === "UPCOMING" ? (
+                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-sky-700">
+                      Opens {formatActivityDateRange(activity)}
+                    </p>
+                  ) : null}
+                  <Link href={bookingHref} className="btn-gradient-primary inline-flex items-center gap-2 rounded-full px-7 py-4 font-black text-white shadow-lg shadow-primary-900/15">
+                    {lifecycle === "UPCOMING" ? "Book ahead" : "Book Now"}
+                    <ArrowRight className="h-5 w-5" />
+                  </Link>
+                </div>
               ) : (
                 <span className="inline-flex rounded-full bg-slate-200 px-7 py-4 font-black text-slate-500">
                   Booking unavailable

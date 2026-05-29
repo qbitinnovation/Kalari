@@ -47,7 +47,7 @@ export default connectDB;
 
 // Schemas
 const userSchema = new mongoose.Schema({}, { strict: false, collection: "users" });
-const genericSchema = new mongoose.Schema({ id: String }, { strict: false });
+const genericSchema = new mongoose.Schema({ agent_code: String }, { strict: false, id: false });
 
 export const User = mongoose.models.User || mongoose.model("User", userSchema);
 

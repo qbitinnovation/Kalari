@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { DashboardProvider } from '@/contexts/DashboardContext'
 import RoleProtectedRoute from '@/components/RoleProtectedRoute'
+import { AdminNotificationToasts, type NotificationToast } from '@/components/AdminNotificationToasts'
 import {
   Home,
   Film,
@@ -25,6 +27,7 @@ import {
   ChevronRight,
   User,
   Users,
+  WalletCards,
   UserRound,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -47,6 +50,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarTooltip, setSidebarTooltip] = useState<{ label: string; top: number; left: number } | null>(null)
   const [signingOut, setSigningOut] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -65,7 +69,10 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [notificationToasts, setNotificationToasts] = useState<NotificationToast[]>([])
   const notificationWrapRef = React.useRef<HTMLDivElement>(null)
+  const knownNotificationIdsRef = React.useRef<Set<string>>(new Set())
+  const isInitialNotificationFetchRef = React.useRef(true)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [passwordForm, setPasswordForm] = useState({
     newPassword: '',
@@ -74,6 +81,71 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
   const notificationId = (notification: Notification) => String(notification.id || notification._id || '')
+
+  const markNotificationToastShown = async (notification: Notification) => {
+    if (!user?.id || (notification.toast_shown_by || []).includes(user.id)) return
+    const id = notificationId(notification)
+    if (!id) return
+    setNotifications((current) => current.map((item) =>
+      notificationId(item) === id ? { ...item, toast_shown_by: [...(item.toast_shown_by || []), user.id] } : item
+    ))
+    await fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notificationId: id, userId: user.id, action: 'toast_shown' }),
+    }).catch(() => null)
+  }
+
+  const enqueueNotificationToasts = React.useCallback((items: Notification[]) => {
+    const userId = user?.id || ''
+    if (!userId) return
+
+    const freshToasts: Notification[] = []
+
+    for (const item of items) {
+      const id = notificationId(item)
+      if (!id) continue
+      if ((item.toast_shown_by || []).includes(userId)) {
+        knownNotificationIdsRef.current.add(id)
+        continue
+      }
+
+      if (isInitialNotificationFetchRef.current) {
+        knownNotificationIdsRef.current.add(id)
+        continue
+      }
+
+      if (knownNotificationIdsRef.current.has(id)) continue
+      knownNotificationIdsRef.current.add(id)
+      freshToasts.push(item)
+    }
+
+    if (isInitialNotificationFetchRef.current) {
+      isInitialNotificationFetchRef.current = false
+      return
+    }
+
+    if (!freshToasts.length) return
+
+    freshToasts.forEach((notification) => {
+      void markNotificationToastShown(notification)
+    })
+
+    setNotificationToasts((current) => {
+      const next = [
+        ...current,
+        ...freshToasts.map((notification) => ({
+          notification,
+          toastKey: `${notificationId(notification)}-${Date.now()}`,
+        })),
+      ]
+      return next.slice(-3)
+    })
+  }, [user?.id])
+
+  const dismissNotificationToast = React.useCallback((toastKey: string) => {
+    setNotificationToasts((current) => current.filter((toast) => toast.toastKey !== toastKey))
+  }, [])
 
   useEffect(() => {
     if (!user) return
@@ -95,6 +167,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', JSON.stringify(sidebarCollapsed))
+    if (!sidebarCollapsed) setSidebarTooltip(null)
   }, [sidebarCollapsed])
 
   const fetchNotifications = React.useCallback(async () => {
@@ -103,16 +176,26 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     try {
       const response = await fetch(`/api/notifications?role=${encodeURIComponent(user.role)}&limit=12`)
       const payload = await response.json().catch(() => ({}))
-      if (response.ok) setNotifications(payload.data || [])
+      if (response.ok) {
+        const items = payload.data || []
+        setNotifications(items)
+        enqueueNotificationToasts(items)
+      }
     } finally {
       setNotificationsLoading(false)
     }
-  }, [user?.role])
+  }, [enqueueNotificationToasts, user?.role])
+
+  useEffect(() => {
+    knownNotificationIdsRef.current = new Set()
+    isInitialNotificationFetchRef.current = true
+    setNotificationToasts([])
+  }, [user?.id])
 
   useEffect(() => {
     fetchNotifications()
     if (!user?.role) return
-    const interval = window.setInterval(fetchNotifications, 60000)
+    const interval = window.setInterval(fetchNotifications, 30000)
     return () => window.clearInterval(interval)
   }, [fetchNotifications, user?.role])
 
@@ -199,10 +282,10 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const getNavigation = () => {
     const staffNavigation = [
       { name: 'Shows', href: '/admin/shows', icon: Film },
-      { name: 'Book Tickets', href: '/admin/booking', icon: Ticket },
+      { name: 'Activities', href: '/admin/activities', icon: Map },
+      { name: 'Counter Booking', href: '/admin/booking', icon: Ticket },
       { name: 'Customers', href: '/admin/customers', icon: User },
       { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
-      { name: 'Activities', href: '/admin/activities', icon: Map },
       { name: 'Messages', href: '/admin/messages', icon: Mail },
       { name: 'Website Content', href: '/admin/website-content', icon: Globe2 },
     ]
@@ -215,6 +298,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         { name: 'Reports', href: '/admin/reports', icon: BarChart },
         { name: 'Analytics', href: '/admin/analytics', icon: LineChart },
         { name: 'Agents', href: '/admin/agents', icon: Users },
+        { name: 'Commissions', href: '/admin/commissions', icon: WalletCards },
         { name: 'Staff Management', href: '/admin/staff', icon: ShieldCheck },
         { name: 'Settings', href: '/admin/settings', icon: SettingsIcon },
       ]
@@ -229,7 +313,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const routeLabels: Record<string, string> = {
     '/admin': 'Dashboard',
     '/admin/shows': 'Shows',
-    '/admin/booking': 'Book Tickets',
+    '/admin/booking': 'Counter Booking',
     '/admin/customers': 'Customers',
     '/admin/tickets': 'Ticket History',
     '/admin/activities': 'Activities',
@@ -240,6 +324,7 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     '/admin/reports': 'Reports',
     '/admin/analytics': 'Analytics',
     '/admin/agents': 'Agents',
+    '/admin/commissions': 'Commissions',
     '/admin/staff': 'Staff Management',
     '/admin/settings': 'Settings',
   }
@@ -346,14 +431,19 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       )}
 
       {/* Desktop Sidebar */}
-      <div className={`hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-50 lg:flex lg:flex-col transition-all duration-300 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-72'} ${darkMode ? 'lg:bg-slate-900 lg:border-r lg:border-slate-800' : 'lg:bg-white lg:border-r lg:border-slate-200'}`}>
+      <div
+        className={`hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-50 lg:block transition-all duration-300 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-72'}`}
+      >
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`absolute -right-3 top-24 z-[70] flex h-7 w-7 items-center justify-center rounded-full border shadow-md transition-colors duration-200 ${darkMode ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`}
+          className={`absolute -right-3 top-24 z-[100] flex h-7 w-7 items-center justify-center rounded-full border shadow-md transition-colors duration-200 ${darkMode ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`}
           aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
+        <div
+          className={`flex h-full flex-col overflow-hidden ${darkMode ? 'border-r border-slate-800 bg-slate-900' : 'border-r border-slate-200 bg-white'}`}
+        >
         <div className={`flex h-20 items-center px-4 border-b transition-colors duration-200 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
           <div className="flex items-center space-x-3 min-w-0">
             <div className="relative w-10 h-10 flex-shrink-0 transition-transform hover:scale-105">
@@ -373,15 +463,42 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-6">
-          <ul className="space-y-2">
+        <nav
+          className={`flex-1 min-h-0 px-3 ${
+            sidebarCollapsed
+              ? 'overflow-x-hidden overflow-y-auto py-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden'
+              : 'overflow-x-hidden overflow-y-auto py-6'
+          }`}
+        >
+          <ul className={sidebarCollapsed ? 'space-y-1' : 'space-y-2'}>
             {navigation.map((item) => {
               const isActive = item.href === '/admin' ? pathname === '/admin' : pathname === item.href || pathname.startsWith(`${item.href}/`)
               return (
                 <li key={item.name}>
                   <Link
                     href={item.href}
-                    className={`flex items-center ${sidebarCollapsed ? 'justify-center px-3 py-3' : 'px-4 py-3'} text-sm font-bold rounded-xl transition-all duration-200 group relative ${isActive
+                    title={sidebarCollapsed ? item.name : undefined}
+                    onMouseEnter={(event) => {
+                      if (!sidebarCollapsed) return
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      setSidebarTooltip({
+                        label: item.name,
+                        top: rect.top + rect.height / 2,
+                        left: rect.right + 10,
+                      })
+                    }}
+                    onMouseLeave={() => setSidebarTooltip(null)}
+                    onFocus={(event) => {
+                      if (!sidebarCollapsed) return
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      setSidebarTooltip({
+                        label: item.name,
+                        top: rect.top + rect.height / 2,
+                        left: rect.right + 10,
+                      })
+                    }}
+                    onBlur={() => setSidebarTooltip(null)}
+                    className={`flex items-center ${sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'px-4 py-3'} text-sm font-bold rounded-xl transition-all duration-200 ${isActive
                       ? 'admin-nav-link-active'
                       : darkMode
                         ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -390,11 +507,6 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   >
                     <item.icon className={`h-5 w-5 flex-shrink-0 ${sidebarCollapsed ? '' : 'mr-3'}`} />
                     {!sidebarCollapsed && <span>{item.name}</span>}
-                    {sidebarCollapsed && (
-                      <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                        {item.name}
-                      </div>
-                    )}
                   </Link>
                 </li>
               )
@@ -406,7 +518,28 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           <button
             onClick={handleSignOut}
             disabled={signingOut}
-            className={`group relative flex w-full items-center rounded-xl text-sm font-bold transition-all duration-200 ${sidebarCollapsed ? 'justify-center px-3 py-3' : 'px-4 py-3'} ${
+            title={sidebarCollapsed ? (signingOut ? 'Logging out...' : 'Logout') : undefined}
+            onMouseEnter={(event) => {
+              if (!sidebarCollapsed) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              setSidebarTooltip({
+                label: signingOut ? 'Logging out...' : 'Logout',
+                top: rect.top + rect.height / 2,
+                left: rect.right + 10,
+              })
+            }}
+            onMouseLeave={() => setSidebarTooltip(null)}
+            onFocus={(event) => {
+              if (!sidebarCollapsed) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              setSidebarTooltip({
+                label: signingOut ? 'Logging out...' : 'Logout',
+                top: rect.top + rect.height / 2,
+                left: rect.right + 10,
+              })
+            }}
+            onBlur={() => setSidebarTooltip(null)}
+            className={`flex w-full items-center rounded-xl text-sm font-bold transition-all duration-200 ${sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'px-4 py-3'} ${
               signingOut
                 ? 'opacity-50 cursor-not-allowed'
                 : darkMode
@@ -416,14 +549,21 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           >
             <LogOut className={`h-5 w-5 flex-shrink-0 ${sidebarCollapsed ? '' : 'mr-3'}`} />
             {!sidebarCollapsed && <span>{signingOut ? 'Logging out...' : 'Logout'}</span>}
-            {sidebarCollapsed && (
-              <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                Logout
-              </div>
-            )}
           </button>
         </div>
+        </div>
       </div>
+
+      {sidebarCollapsed && sidebarTooltip && typeof document !== 'undefined' && createPortal(
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed z-[300] -translate-y-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white shadow-lg dark:bg-slate-100 dark:text-slate-900"
+          style={{ top: sidebarTooltip.top, left: sidebarTooltip.left }}
+        >
+          {sidebarTooltip.label}
+        </div>,
+        document.body,
+      )}
 
       {/* Mobile Header */}
       <div className={`lg:hidden border-b px-4 py-4 transition-colors duration-200 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -552,11 +692,19 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
       <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'}`}>
         <main className="min-h-screen px-2 pb-4 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pb-6">
-          <div className="admin-page-surface min-h-[calc(100vh-8.5rem)] rounded-2xl border p-4 shadow-sm sm:p-6">
+          <div className="admin-page-surface rounded-2xl border p-3 shadow-sm sm:p-4">
             {children}
           </div>
         </main>
       </div>
+
+      <AdminNotificationToasts
+        toasts={notificationToasts}
+        darkMode={darkMode}
+        autoHideMs={5000}
+        onDismiss={dismissNotificationToast}
+        onOpen={openNotification}
+      />
 
       {showPasswordModal && (
         <div className="admin-modal-overlay">

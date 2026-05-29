@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB, { getGenericModel } from "@/lib/db";
-import { localQuery } from "@/lib/localStore";
+import { localQuery, readStore, writeStore } from "@/lib/localStore";
+import { syncActivityStatusesLocal, syncAllActivitiesInMongo } from "@/lib/catalogLifecycle";
 
 const getActivityPayload = async (req: NextRequest) => {
   await connectDB();
   const Activity = getGenericModel("activities") as any;
+  await syncAllActivitiesInMongo(Activity);
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status") || "ACTIVE";
   const category = searchParams.get("category");
@@ -23,6 +25,9 @@ export async function GET(req: NextRequest) {
   try {
     return NextResponse.json({ data: await getActivityPayload(req) });
   } catch (error: any) {
+    const store = await readStore();
+    if (syncActivityStatusesLocal(store)) await writeStore(store);
+
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") || "ACTIVE";
     const category = searchParams.get("category");

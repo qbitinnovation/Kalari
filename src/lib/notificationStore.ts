@@ -24,6 +24,7 @@ export async function createNotification(input: NotificationInput) {
     target_roles: input.target_roles?.length ? input.target_roles : DEFAULT_NOTIFICATION_ROLES,
     severity: input.severity || "INFO",
     read_by: [],
+    toast_shown_by: [],
     created_at: new Date().toISOString(),
   };
 

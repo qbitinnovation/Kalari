@@ -25,6 +25,11 @@ export const getSeedData = () => {
     created_at: new Date().toISOString(),
   };
 
+  const activityWindow = {
+    start_date: toDate(0),
+    end_date: toDate(90),
+  };
+
   const activities = [
     {
       id: "activity-kalari-evening-show",
@@ -33,6 +38,7 @@ export const getSeedData = () => {
       category: "Kalari Booking",
       location: "Kovalam Kalari Arena",
       duration: "1.5 hours",
+      ...activityWindow,
       price: 799,
       booking_price: 799,
       daily_capacity: 120,
@@ -56,6 +62,7 @@ export const getSeedData = () => {
       category: "Activities",
       location: "Kovalam Training Hall",
       duration: "2 hours",
+      ...activityWindow,
       price: 2499,
       booking_price: 2499,
       daily_capacity: 18,
@@ -79,6 +86,7 @@ export const getSeedData = () => {
       category: "Activities",
       location: "Poovar Backwaters",
       duration: "5 hours",
+      ...activityWindow,
       price: 1899,
       booking_price: 1899,
       daily_capacity: 30,
@@ -102,6 +110,7 @@ export const getSeedData = () => {
       category: "Activities",
       location: "Kovalam Wellness Studio",
       duration: "90 minutes",
+      ...activityWindow,
       price: 1599,
       booking_price: 1599,
       daily_capacity: 20,
@@ -125,6 +134,7 @@ export const getSeedData = () => {
       category: "Activities",
       location: "Thiruvananthapuram",
       duration: "3 hours",
+      ...activityWindow,
       price: 999,
       booking_price: 999,
       daily_capacity: 25,
@@ -144,12 +154,10 @@ export const getSeedData = () => {
   ];
 
   const shows = [];
-  
-  // Generate daily evening shows for the next 14 days
+
   for (let i = 0; i < 14; i++) {
     shows.push({
       id: `show-kalari-evening-${i}`,
-      activity_id: "activity-kalari-evening-show",
       title: "Kalaripayattu Evening Fire Show",
       date: toDate(i),
       time: "18:30",
@@ -164,14 +172,12 @@ export const getSeedData = () => {
       created_at: new Date().toISOString(),
     });
 
-    // Add a second show on weekends (Friday, Saturday, Sunday)
     const date = new Date();
     date.setDate(date.getDate() + i);
     const day = date.getDay();
     if (day === 0 || day === 5 || day === 6) {
       shows.push({
         id: `show-kalari-night-${i}`,
-        activity_id: "activity-kalari-evening-show",
         title: "Kalaripayattu Premium Night Show",
         date: toDate(i),
         time: "20:30",
@@ -186,72 +192,10 @@ export const getSeedData = () => {
         created_at: new Date().toISOString(),
       });
     }
-
-    // Add workshops every 2 days
-    if (i % 2 === 0) {
-      shows.push({
-        id: `show-kalari-workshop-${i}`,
-        activity_id: "activity-private-kalari-workshop",
-        title: "Private Kalari Basics Workshop",
-        date: toDate(i),
-        time: "10:00",
-        price: 2499,
-        image: activityImages.temple,
-        description: "A guided hands-on workshop for travellers and small groups.",
-        type: "EVENT",
-        capacity: 18,
-        layout_id: null,
-        active: true,
-        status: "ACTIVE",
-        created_at: new Date().toISOString(),
-      });
-    }
-
-    // Add Backwater trips on Tuesdays and Thursdays
-    if (day === 2 || day === 4) {
-      shows.push({
-        id: `show-backwater-${i}`,
-        activity_id: "activity-backwater-day",
-        title: "Kerala Backwater Day Escape",
-        date: toDate(i),
-        time: "09:00",
-        price: 1899,
-        image: activityImages.boat,
-        description: "Cruise through quiet backwaters, coconut groves, and village canals.",
-        type: "EVENT",
-        capacity: 12,
-        layout_id: null,
-        active: true,
-        status: "ACTIVE",
-        created_at: new Date().toISOString(),
-      });
-    }
-
-    // Add Ayurveda sessions on Wednesdays and Mondays
-    if (day === 1 || day === 3) {
-      shows.push({
-        id: `show-ayurveda-${i}`,
-        activity_id: "activity-ayurveda-reset",
-        title: "Ayurveda Reset Session",
-        date: toDate(i),
-        time: "11:00",
-        price: 1599,
-        image: activityImages.ayurveda,
-        description: "A calm wellness session with consultation and herbal oil therapy.",
-        type: "EVENT",
-        capacity: 4,
-        layout_id: null,
-        active: true,
-        status: "ACTIVE",
-        created_at: new Date().toISOString(),
-      });
-    }
   }
 
-  // Add some specific upcoming events
   shows.push({
     id: "show-cultural-festival",
-    activity_id: "activity-kalari-evening-show",
     title: "Grand Kalari Cultural Festival",
     date: toDate(7),
     time: "17:00",
@@ -268,4 +212,3 @@ export const getSeedData = () => {
 
   return { activities, shows, layouts: [layout] };
 };
-

@@ -11,6 +11,7 @@ type AdminReportOptions = {
   subtitle: string;
   body: string;
   generatedLabel: string;
+  compact?: boolean;
 };
 
 const reportStyles = `
@@ -117,7 +118,52 @@ const reportStyles = `
     font-size: 11px;
     font-weight: 700;
   }
-  @page { margin: 14mm; size: A4 landscape; }
+  .report-top {
+    display: grid;
+    gap: 14px;
+    margin: 18px 0 14px;
+  }
+  .kv-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px 16px;
+    padding: 12px 0;
+    border-top: 1px solid #e2e8f0;
+  }
+  .kv-grid:last-child {
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .kv-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .kv-item .label {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  .kv-item .value {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+  .bookings-section { margin-top: 4px; }
+  .bookings-section h2 { margin-bottom: 8px; font-size: 14px; }
+  .page.compact .report-head { padding-bottom: 16px; gap: 16px; }
+  .page.compact .logo { width: 52px; height: 52px; padding: 4px; }
+  .page.compact .brand-name { font-size: 20px; }
+  .page.compact h1 { margin-top: 14px; font-size: 24px; }
+  .page.compact .subtitle { margin-top: 4px; font-size: 13px; }
+  .page.compact .report-top { margin: 12px 0 10px; gap: 10px; }
+  .page.compact .kv-grid { padding: 8px 0; gap: 10px 12px; }
+  .page.compact .bookings-section { margin-top: 0; }
+  .page.compact .bookings-section h2 { margin-bottom: 6px; font-size: 13px; }
+  .page.compact .report-foot { margin-top: 12px; padding-top: 8px; }
+  @page { margin: 8mm; size: A4 landscape; }
   @media print {
     body { background: #fff; }
     .page {
@@ -128,6 +174,21 @@ const reportStyles = `
       border-radius: 0;
       box-shadow: none;
     }
+    .report-head { padding-bottom: 14px; gap: 16px; }
+    .logo { width: 56px; height: 56px; padding: 4px; }
+    .brand-name { font-size: 18px; }
+    h1 { margin-top: 12px; font-size: 22px; }
+    .subtitle { margin-top: 4px; font-size: 12px; }
+    .report-top { margin: 10px 0 8px; gap: 8px; }
+    .metrics { margin: 0; gap: 8px; }
+    .metric { min-height: auto; padding: 8px 10px; break-inside: avoid; }
+    .metric .value { margin-top: 4px; font-size: 16px; }
+    .kv-grid { padding: 8px 0; gap: 8px 12px; }
+    .bookings-section h2 { margin-bottom: 6px; font-size: 12px; }
+    table { font-size: 11px; }
+    th { padding: 7px 6px; }
+    td { padding: 8px 6px; }
+    .report-foot { margin-top: 10px; padding-top: 8px; font-size: 10px; }
     .panel, .metric { break-inside: avoid; }
     tr { break-inside: avoid; }
   }
@@ -138,6 +199,7 @@ export const buildAdminReportDocument = ({
   subtitle,
   body,
   generatedLabel,
+  compact = false,
 }: AdminReportOptions) => `
   <!DOCTYPE html>
   <html>
@@ -147,7 +209,7 @@ export const buildAdminReportDocument = ({
       <style>${reportStyles}</style>
     </head>
     <body>
-      <main class="page">
+      <main class="page${compact ? " compact" : ""}">
         <header class="report-head">
           <div class="brand">
             <img class="logo" src="/logo.png" alt="Kovalam Kalari logo" />

@@ -16,7 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logActivity } from '@/utils/activityLogger'
-import { AdminTable, AdminTableBody, AdminTableHead, Button, DateRangePicker } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableHead, AdminTableSkeleton, Button, DateRangePicker } from '@/components/ui'
 
 interface AnalyticsData {
   totalRevenue: number
@@ -613,17 +613,6 @@ const Analytics: React.FC = () => {
     }
   }
 
-  if (loading) {
-    return (
-      <div className={`min-h-screen flex items-center justify-center transition-colors duration-200 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
-          <p className={`transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Loading analytics...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -667,7 +656,9 @@ const Analytics: React.FC = () => {
           </div>
           <div>
             <h3 className={`text-sm font-medium mb-1 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Revenue</h3>
-            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>₹{analytics.totalRevenue.toLocaleString()}</p>
+            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {loading ? <span className={`inline-block h-8 w-28 animate-pulse rounded ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`} /> : `₹${analytics.totalRevenue.toLocaleString()}`}
+            </p>
           </div>
         </div>
 
@@ -680,7 +671,9 @@ const Analytics: React.FC = () => {
           </div>
           <div>
             <h3 className={`text-sm font-medium mb-1 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Tickets</h3>
-            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>{analytics.totalTickets.toLocaleString()}</p>
+            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {loading ? <span className={`inline-block h-8 w-16 animate-pulse rounded ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`} /> : analytics.totalTickets.toLocaleString()}
+            </p>
           </div>
         </div>
 
@@ -693,7 +686,9 @@ const Analytics: React.FC = () => {
           </div>
           <div>
             <h3 className={`text-sm font-medium mb-1 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Avg. Ticket Price</h3>
-            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>₹{analytics.averageTicketPrice.toFixed(0)}</p>
+            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {loading ? <span className={`inline-block h-8 w-20 animate-pulse rounded ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`} /> : `₹${analytics.averageTicketPrice.toFixed(0)}`}
+            </p>
           </div>
         </div>
 
@@ -706,7 +701,9 @@ const Analytics: React.FC = () => {
           </div>
           <div>
             <h3 className={`text-sm font-medium mb-1 transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Avg. Tickets Per Show</h3>
-            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>{analytics.averageTicketsPerShow.toFixed(0)}</p>
+            <p className={`text-2xl font-bold transition-colors duration-200 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {loading ? <span className={`inline-block h-8 w-16 animate-pulse rounded ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`} /> : analytics.averageTicketsPerShow.toFixed(0)}
+            </p>
           </div>
         </div>
 
@@ -744,7 +741,9 @@ const Analytics: React.FC = () => {
                 </tr>
               </AdminTableHead>
               <AdminTableBody>
-                {(viewType === 'daily' ? analytics.dailyData : 
+                {loading ? (
+                  <AdminTableSkeleton columns={4} />
+                ) : (viewType === 'daily' ? analytics.dailyData : 
                   viewType === 'monthly' ? analytics.monthlyData : 
                   analytics.yearlyData).length === 0 ? (
                   <tr>
@@ -791,7 +790,9 @@ const Analytics: React.FC = () => {
                 </tr>
               </AdminTableHead>
               <AdminTableBody>
-                {analytics.showPerformance.length === 0 ? (
+                {loading ? (
+                  <AdminTableSkeleton columns={3} leadColumn="avatar" />
+                ) : analytics.showPerformance.length === 0 ? (
                   <tr>
                     <td colSpan={3} className={`py-8 text-center text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                       No show performance data available
@@ -846,7 +847,9 @@ const Analytics: React.FC = () => {
                 </tr>
               </AdminTableHead>
               <AdminTableBody>
-                {analytics.customerPerformance.length === 0 ? (
+                {loading ? (
+                  <AdminTableSkeleton columns={4} leadColumn="avatar" />
+                ) : analytics.customerPerformance.length === 0 ? (
                   <tr>
                     <td colSpan={4} className={`py-8 text-center text-sm transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                       No customer performance data available

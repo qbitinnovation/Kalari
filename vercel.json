@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/commission-reminders?slot=morning",
+      "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/commission-reminders?slot=evening",
+      "schedule": "30 12 * * *"
+    }
+  ]
+}

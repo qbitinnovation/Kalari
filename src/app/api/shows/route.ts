@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB, { getGenericModel } from "@/lib/db";
-import { localQuery } from "@/lib/localStore";
+import { localQuery, readStore, writeStore } from "@/lib/localStore";
 import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity, isShowBookableAt } from "@/lib/booking";
+import { syncAllShowsInMongo, syncShowStatusesLocal } from "@/lib/catalogLifecycle";
 
 const enrichShows = async (shows: any[]) => {
   const Layout = getGenericModel("layouts") as any;
@@ -38,6 +39,8 @@ export async function GET(req: NextRequest) {
   try {
     await connectDB();
     const Show = getGenericModel("shows") as any;
+    const Ticket = getGenericModel("tickets") as any;
+    await syncAllShowsInMongo(Show, Ticket);
     const { searchParams } = new URL(req.url);
     const upcoming = searchParams.get("upcoming") !== "false";
     const activityId = searchParams.get("activityId");
@@ -57,6 +60,9 @@ export async function GET(req: NextRequest) {
         : enriched
     });
   } catch (error: any) {
+    const store = await readStore();
+    if (syncShowStatusesLocal(store)) await writeStore(store);
+
     const { searchParams } = new URL(req.url);
     const rangeFilters: Record<string, any> = {};
     const filters: Record<string, any> = {};

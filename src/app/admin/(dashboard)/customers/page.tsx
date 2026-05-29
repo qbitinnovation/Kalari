@@ -5,10 +5,15 @@ import { db, Customer } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
-import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, Button, Input, SearchInput, Textarea } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, AdminTableSkeleton, Button, Input, IndianPhoneField, SearchInput, Textarea } from '@/components/ui'
 import { getRecordId } from '@/lib/booking'
 import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
 import { formatDisplayDateValue } from '@/components/ui/date-utils'
+import {
+  formatIndianMobileForStorage,
+  getIndianMobileDigits,
+  getIndianMobileValidationError,
+} from '@/lib/indianPhone'
 import {
   PlusIcon,
   PencilIcon,
@@ -68,8 +73,8 @@ const Customers: React.FC = () => {
       errors.email = 'Please enter a valid email address'
     }
     
-    if (formData.phone && !/^[+]?[0-9\-\s()]{10,}$/.test(formData.phone)) {
-      errors.phone = 'Please enter a valid phone number'
+    if (formData.phone && getIndianMobileValidationError(formData.phone)) {
+      errors.phone = getIndianMobileValidationError(formData.phone)
     }
     
     setFormErrors(errors)
@@ -85,21 +90,23 @@ const Customers: React.FC = () => {
       setSubmitting(true)
       
       if (editingCustomer) {
-        // Update existing customer
         const { error } = await db
           .from('customers')
           .update({
             ...formData,
+            phone: formData.phone.trim() ? formatIndianMobileForStorage(formData.phone) : '',
             updated_at: new Date().toISOString()
           })
           .eq('id', getRecordId(editingCustomer))
         
         if (error) throw error
       } else {
-        // Create new customer
         const { error } = await db
           .from('customers')
-          .insert([formData])
+          .insert([{
+            ...formData,
+            phone: formData.phone.trim() ? formatIndianMobileForStorage(formData.phone) : '',
+          }])
         
         if (error) throw error
       }
@@ -119,7 +126,7 @@ const Customers: React.FC = () => {
     setFormData({
       name: customer.name,
       email: customer.email || '',
-      phone: customer.phone || '',
+      phone: getIndianMobileDigits(customer.phone || ''),
       address: customer.address || ''
     })
     setFormErrors({})
@@ -180,43 +187,35 @@ const Customers: React.FC = () => {
 
       {/* Customers List */}
       <AdminTablePanel>
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-          </div>
-        ) : filteredCustomers.length === 0 ? (
-          <div className="text-center py-12">
-            <UserIcon className={`mx-auto h-12 w-12 mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
-            <h3 className={`text-lg font-medium mb-2 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-              {searchTerm ? 'No customers found' : 'No customers yet'}
-            </h3>
-            <p className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              {searchTerm ? 'Try adjusting your search terms' : 'Get started by adding your first customer'}
-            </p>
-          </div>
-        ) : (
-              <AdminTable>
-                <AdminTableHead>
-                  <tr>
-                    <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Customer
-                    </th>
-                    <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Contact
-                    </th>
-                    <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Address
-                    </th>
-                    <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Created
-                    </th>
-                    <th className={`px-6 py-3 text-right text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                      Actions
-                    </th>
-                  </tr>
-                </AdminTableHead>
-                <AdminTableBody>
-                  {filteredCustomers.map((customer, index) => (
+        <AdminTable>
+          <AdminTableHead>
+            <tr>
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Customer
+              </th>
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Contact
+              </th>
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Address
+              </th>
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Created
+              </th>
+              <th className={`px-6 py-3 text-right text-xs font-medium uppercase tracking-wider ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                Actions
+              </th>
+            </tr>
+          </AdminTableHead>
+          <AdminTableBody>
+            {loading ? (
+              <AdminTableSkeleton columns={5} leadColumn="avatar" />
+            ) : filteredCustomers.length === 0 ? (
+              <AdminTableEmpty colSpan={5}>
+                {searchTerm ? 'No customers found. Try adjusting your search terms.' : 'No customers yet. Get started by adding your first customer.'}
+              </AdminTableEmpty>
+            ) : (
+              filteredCustomers.map((customer, index) => (
                     <motion.tr
                       key={getRecordId(customer) || `customer-row-${index}`}
                       initial={{ opacity: 0 }}
@@ -295,10 +294,10 @@ const Customers: React.FC = () => {
                         </div>
                       </td>
                     </motion.tr>
-                  ))}
-                </AdminTableBody>
-              </AdminTable>
-        )}
+                  ))
+            )}
+          </AdminTableBody>
+        </AdminTable>
       </AdminTablePanel>
 
       {/* Add/Edit Customer Modal */}
@@ -351,12 +350,10 @@ const Customers: React.FC = () => {
               </div>
 
               <div>
-                <Input
+                <IndianPhoneField
                   label="Phone"
-                  type="tel"
                   value={formData.phone}
                   onChange={(phone) => setFormData({ ...formData, phone })}
-                  placeholder="Enter phone number"
                   error={formErrors.phone}
                 />
               </div>

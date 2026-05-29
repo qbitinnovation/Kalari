@@ -27,8 +27,8 @@ export function AdminTablePanel({
       )}
     >
       {(title || actions) && (
-        <header className="flex flex-col gap-3 border-b border-slate-200 px-6 py-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-          {title && <div className="text-xl font-semibold text-slate-950 dark:text-slate-100">{title}</div>}
+        <header className="flex flex-col gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+          {title && <div className="text-base font-semibold text-slate-950 dark:text-slate-100">{title}</div>}
           {actions}
         </header>
       )}
@@ -76,7 +76,7 @@ export function AdminTableHeaderCell({
   return (
     <th
       className={cn(
-        'px-6 py-4 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400',
+        'px-4 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400',
         alignClass[align],
         className
       )}
@@ -93,7 +93,7 @@ export function AdminTableCell({
   children,
 }: AdminTableCellProps) {
   return (
-    <td colSpan={colSpan} className={cn('px-6 py-4 align-middle text-sm', alignClass[align], className)}>
+    <td colSpan={colSpan} className={cn('px-4 py-3 align-middle text-sm', alignClass[align], className)}>
       {children}
     </td>
   )
@@ -102,9 +102,54 @@ export function AdminTableCell({
 export function AdminTableEmpty({ colSpan, children, className }: AdminTableCellProps) {
   return (
     <AdminTableRow className="hover:bg-transparent dark:hover:bg-transparent">
-      <AdminTableCell colSpan={colSpan} className={cn('px-6 py-16 text-center font-semibold text-slate-400', className)}>
+      <AdminTableCell colSpan={colSpan} className={cn('px-4 py-10 text-center font-semibold text-slate-400', className)}>
         {children || 'Nothing to display.'}
       </AdminTableCell>
     </AdminTableRow>
+  )
+}
+
+function SkeletonBar({ className }: { className?: string }) {
+  return <div className={cn('animate-pulse rounded-md bg-slate-200 dark:bg-slate-700', className)} />
+}
+
+export type AdminTableSkeletonProps = {
+  columns: number
+  rows?: number
+  leadColumn?: 'avatar' | 'default'
+}
+
+export function AdminTableSkeleton({
+  columns,
+  rows = 6,
+  leadColumn = 'default',
+}: AdminTableSkeletonProps) {
+  const barWidths = ['w-full', 'w-3/4', 'w-2/3', 'w-4/5', 'w-1/2', 'w-3/5', 'w-2/5']
+
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <AdminTableRow key={rowIndex} className="hover:bg-transparent dark:hover:bg-transparent">
+          {Array.from({ length: columns }).map((_, colIndex) => (
+            <AdminTableCell
+              key={colIndex}
+              align={colIndex === columns - 1 ? 'right' : 'left'}
+            >
+              {colIndex === 0 && leadColumn === 'avatar' ? (
+                <div className="flex items-center gap-4">
+                  <SkeletonBar className="h-10 w-10 shrink-0 rounded-xl" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <SkeletonBar className="h-4 w-32 max-w-full" />
+                    <SkeletonBar className="h-3 w-20 max-w-full" />
+                  </div>
+                </div>
+              ) : (
+                <SkeletonBar className={cn('h-4', barWidths[(rowIndex + colIndex) % barWidths.length], colIndex === columns - 1 && 'ml-auto')} />
+              )}
+            </AdminTableCell>
+          ))}
+        </AdminTableRow>
+      ))}
+    </>
   )
 }

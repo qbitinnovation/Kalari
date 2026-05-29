@@ -4,9 +4,10 @@ import React, { useState } from 'react'
 import PublicNavbar from '@/components/PublicNavbar'
 import { PublicFooter } from '@/components/PublicFooter'
 import { Mail, Phone, MapPin, Send, MessageSquare, Instagram, Facebook, Twitter, CheckCircle2 } from 'lucide-react'
-import { Input, Textarea } from '@/components/ui'
+import { Input, IndianPhoneField, Textarea } from '@/components/ui'
 import { PublicHero } from '@/components/PublicHero'
 import { activityImages } from '@/lib/seedData'
+import { formatIndianMobileForStorage, getIndianMobileValidationError } from '@/lib/indianPhone'
 
 const Contact: React.FC = () => {
   const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' })
@@ -17,12 +18,20 @@ const Contact: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    const phoneError = form.phone.trim() ? getIndianMobileValidationError(form.phone) : ''
+    if (phoneError) {
+      setError(phoneError)
+      return
+    }
     setLoading(true)
     try {
       const response = await fetch('/api/contact-messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          phone: form.phone.trim() ? formatIndianMobileForStorage(form.phone) : '',
+        }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'Unable to send message.')
@@ -123,14 +132,12 @@ const Contact: React.FC = () => {
                           inputClassName="rounded-2xl border-2 border-stone-100 px-5 py-4 font-bold"
                         />
                       </div>
-                      <Input
+                      <IndianPhoneField
                         variant="public"
                         label="Phone Number"
-                        type="tel"
                         value={form.phone}
                         onChange={(phone) => setForm({ ...form, phone })}
-                        placeholder="+91 98765 43210"
-                        inputClassName="rounded-2xl border-2 border-stone-100 px-5 py-4 font-bold"
+                        containerClassName="rounded-2xl border-2 border-stone-100"
                       />
                       <Textarea
                         variant="public"

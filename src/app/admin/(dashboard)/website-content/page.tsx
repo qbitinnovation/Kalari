@@ -14,6 +14,7 @@ import {
   AdminTableHeaderCell,
   AdminTablePanel,
   AdminTableRow,
+  AdminTableSkeleton,
   Button,
   Input,
   SearchInput,
@@ -251,7 +252,7 @@ export default function WebsiteContentPage() {
           </AdminTableHead>
           <AdminTableBody>
             {loading ? (
-              <AdminTableEmpty colSpan={5}>Loading content...</AdminTableEmpty>
+              <AdminTableSkeleton columns={5} leadColumn="avatar" />
             ) : filtered.length === 0 ? (
               <AdminTableEmpty colSpan={5}>Nothing to display.</AdminTableEmpty>
             ) : (

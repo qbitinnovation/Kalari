@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB, { getGenericModel } from '@/lib/db';
 import mongoose from 'mongoose';
 import { localQuery } from '@/lib/localStore';
+import { assignAgentIds } from '@/lib/agentId';
+import { backfillAgentPublicIds } from '@/lib/agentIdBackfill';
 import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity, isShowBookableAt } from '@/lib/booking';
+import {
+  syncAllActivitiesInMongo,
+  syncAllShowsInMongo,
+} from '@/lib/catalogLifecycle';
 
 const normalizeIdValue = (value: any) => {
   if (typeof value === 'string' && mongoose.Types.ObjectId.isValid(value)) {
@@ -155,6 +161,22 @@ export async function POST(req: NextRequest) {
 
     const Model = getGenericModel(collection) as any;
 
+    if (collection === "agents" && operation === "select") {
+      await backfillAgentPublicIds();
+    }
+
+    if (operation === "select") {
+      if (collection === "shows") {
+        const Show = getGenericModel("shows") as any;
+        const Ticket = getGenericModel("tickets") as any;
+        await syncAllShowsInMongo(Show, Ticket);
+      }
+      if (collection === "activities") {
+        const Activity = getGenericModel("activities") as any;
+        await syncAllActivitiesInMongo(Activity);
+      }
+    }
+
     if (operation === "insert") {
       if (collection === "bookings") {
         const Show = getGenericModel("shows") as any;
@@ -169,7 +191,12 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
         }
       }
-      const docs = await Model.insertMany(insertPayload || []);
+      let rows = insertPayload || [];
+      if (collection === "agents") {
+        const existingAgents = await Model.find({}).select("agent_code").lean();
+        rows = assignAgentIds(existingAgents, rows);
+      }
+      const docs = await Model.insertMany(rows);
       return NextResponse.json({ data: docs });
     }
 

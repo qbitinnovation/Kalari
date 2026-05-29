@@ -218,9 +218,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Calculate total capacity
       let capacity = 0
-      if (show.type === 'EVENT') {
-        capacity = show.capacity || 0
-      } else if (show.layout?.structure?.sections) {
+      if (show.layout?.structure?.sections) {
         show.layout.structure.sections.forEach((section: any) => {
           if (section.rows && Array.isArray(section.rows)) {
             // New format with individual row configuration

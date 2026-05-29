@@ -14,7 +14,6 @@ import {
   parseSeatCodes,
 } from "@/lib/booking";
 import { createNotification } from "@/lib/notificationStore";
-import { calculateEventCommission, getCommissionPeriodKey } from "@/lib/agentCommission";
 
 type HoldAction = "CONFIRM" | "RELEASE";
 
@@ -47,15 +46,6 @@ const activeInventory = (bookings: any[], excludeId = "") =>
 
 const rejectInventoryConflict = (show: any, seatCodes: string[], bookings: any[], layout?: any) => {
   const inventory = activeInventory(bookings);
-  if (show.type === "EVENT") {
-    const used = inventory.reduce((count, booking) => count + bookingSeats(booking).length, 0);
-    const capacity = Number(show.capacity || 0);
-    if (capacity > 0 && used + seatCodes.length > capacity) {
-      return `Only ${Math.max(0, capacity - used)} tickets remain for this event.`;
-    }
-    return "";
-  }
-
   const blockedSeats = new Set(layout?.structure?.blockedSeats || show.layout?.structure?.blockedSeats || []);
   const takenSeats = new Set(inventory.flatMap(bookingSeats));
   const unavailable = seatCodes.filter((seatCode) => blockedSeats.has(seatCode) || takenSeats.has(seatCode));
@@ -122,7 +112,7 @@ const ensureLocalCustomer = (store: any, form: any) => {
   return customer;
 };
 
-const buildHold = ({ show, seatCodes, customer, form, commissionAmount = 0, commissionPercentage = 0, commissionPeriodKey = null }: { show: any; seatCodes: string[]; customer: any; form: any; commissionAmount?: number; commissionPercentage?: number; commissionPeriodKey?: string | null }) => {
+const buildHold = ({ show, seatCodes, customer, form }: { show: any; seatCodes: string[]; customer: any; form: any }) => {
   const now = nowIso();
   return {
     booking_reference: createBookingReference(new Date(now)),
@@ -133,11 +123,11 @@ const buildHold = ({ show, seatCodes, customer, form, commissionAmount = 0, comm
     payment_method: "RAZORPAY",
     payment_status: "PAYMENT_PENDING",
     total_amount: Number(show.price || 0) * seatCodes.length,
-    agent_id: show.type === "EVENT" ? show.agent_id || null : null,
-    agent_commission_percentage: commissionPercentage,
-    commission_amount: commissionAmount,
-    commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
-    commission_period_key: commissionPeriodKey,
+    agent_id: null,
+    agent_commission_percentage: 0,
+    commission_amount: 0,
+    commission_status: "PAID",
+    commission_period_key: null,
     booking_time: now,
     status: "HELD",
     hold_token: holdToken(),
@@ -177,7 +167,6 @@ export async function POST(req: NextRequest) {
     const showId = String(body?.showId || "");
     const form = body?.form || {};
     const requestedSeats = Array.isArray(body?.seatCodes) ? body.seatCodes.map(String).filter(Boolean) : [];
-    const ticketCount = Math.max(0, Number(body?.ticketCount || 0));
     if (!showId) return NextResponse.json({ error: "Show is required." }, { status: 400 });
 
     await connectDB();
@@ -185,17 +174,14 @@ export async function POST(req: NextRequest) {
     const Booking = getGenericModel("bookings") as any;
     const Customer = getGenericModel("customers") as any;
     const Layout = getGenericModel("layouts") as any;
-    const Agent = getGenericModel("agents") as any;
     await expireMongoHolds(Booking);
 
     const show = await findDocument(Show, showId);
     if (!show || show.status !== "ACTIVE") return NextResponse.json({ error: "This show is not open for booking." }, { status: 400 });
     if (!isShowBookableAt(show)) return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
 
-    const seatCodes = show.type === "EVENT"
-      ? Array.from({ length: ticketCount }).map(() => "GENERAL")
-      : requestedSeats;
-    if (!seatCodes.length) return NextResponse.json({ error: "Select at least one seat or ticket." }, { status: 400 });
+    const seatCodes = requestedSeats;
+    if (!seatCodes.length) return NextResponse.json({ error: "Select at least one seat." }, { status: 400 });
 
     const layout = show.layout_id ? await findDocument(Layout, String(show.layout_id)) : null;
     const showBookings = await Booking.find({ show_id: recordId(show), status: { $in: ["CONFIRMED", "HELD"] } }).lean();
@@ -203,19 +189,12 @@ export async function POST(req: NextRequest) {
     if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
     const customer = await ensureMongoCustomer(Customer, form);
-    const linkedAgent = show.type === "EVENT" && show.agent_id ? await findDocument(Agent, String(show.agent_id)) : null;
-    const commissionPercentage = show.type === "EVENT" && show.agent_id ? Number(show.agent_commission_percentage || 0) : 0;
-    const commissionAmount = linkedAgent || show.agent_id
-      ? calculateEventCommission(Number(show.price || 0) * seatCodes.length, commissionPercentage)
-      : 0;
-    const commissionPeriodKey = commissionAmount > 0 ? getCommissionPeriodKey(new Date(), linkedAgent?.payout_frequency || "DAILY") : null;
-    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form, commissionAmount, commissionPercentage, commissionPeriodKey }));
+    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form }));
     return NextResponse.json({ data: holdPayload(booking) }, { status: 201 });
   } catch (error: any) {
     const showId = String(body?.showId || "");
     const form = body?.form || {};
     const requestedSeats = Array.isArray(body?.seatCodes) ? body.seatCodes.map(String).filter(Boolean) : [];
-    const ticketCount = Math.max(0, Number(body?.ticketCount || 0));
     if (!showId) return NextResponse.json({ error: "Show is required." }, { status: 400 });
 
     try {
@@ -224,10 +203,8 @@ export async function POST(req: NextRequest) {
       const show = (store.shows || []).find((row: any) => recordId(row) === showId);
       if (!show || show.status !== "ACTIVE") return NextResponse.json({ error: "This show is not open for booking." }, { status: 400 });
       if (!isShowBookableAt(show)) return NextResponse.json({ error: "Booking is closed because this show time has passed." }, { status: 400 });
-      const seatCodes = show.type === "EVENT"
-        ? Array.from({ length: ticketCount }).map(() => "GENERAL")
-        : requestedSeats;
-      if (!seatCodes.length) return NextResponse.json({ error: "Select at least one seat or ticket." }, { status: 400 });
+      const seatCodes = requestedSeats;
+      if (!seatCodes.length) return NextResponse.json({ error: "Select at least one seat." }, { status: 400 });
       const layout = (store.layouts || []).find((row: any) => recordId(row) === String(show.layout_id));
       const conflict = rejectInventoryConflict(
         show,
@@ -237,17 +214,9 @@ export async function POST(req: NextRequest) {
       );
       if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
       const customer = ensureLocalCustomer(store, form);
-      const linkedAgent = show.type === "EVENT" && show.agent_id
-        ? (store.agents || []).find((agent: any) => recordId(agent) === String(show.agent_id))
-        : null;
-      const commissionPercentage = show.type === "EVENT" && show.agent_id ? Number(show.agent_commission_percentage || 0) : 0;
-      const commissionAmount = linkedAgent || show.agent_id
-        ? calculateEventCommission(Number(show.price || 0) * seatCodes.length, commissionPercentage)
-        : 0;
-      const commissionPeriodKey = commissionAmount > 0 ? getCommissionPeriodKey(new Date(), linkedAgent?.payout_frequency || "DAILY") : null;
       const booking = {
         id: `bookings-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ...buildHold({ show, seatCodes, customer, form, commissionAmount, commissionPercentage, commissionPeriodKey }),
+        ...buildHold({ show, seatCodes, customer, form }),
       };
       store.bookings = store.bookings || [];
       store.bookings.push(booking);

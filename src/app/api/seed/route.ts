@@ -63,7 +63,7 @@ async function seed() {
     seedCollection("layouts", data.layouts),
   ]);
   const agentCount = await seedCollection("agents", [{
-    id: "agent-local",
+    id: "AGT-0001",
     name: "Booking Agent",
     phone: "+91 98765 43210",
     payout_frequency: "MONTHLY",

@@ -9,6 +9,7 @@ import { PublicHero } from "@/components/PublicHero";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { getAvailabilityLabel, isShowBookableAt } from "@/lib/booking";
+import { isShowPubliclyAccessible } from "@/lib/catalogLifecycle";
 import { DatePicker, Pagination, SearchInput } from "@/components/ui";
 import {
   formatDisplayDateValue,
@@ -28,7 +29,7 @@ interface PublicShow {
   status: string;
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
   available_count?: number;
-  type?: "KALARI" | "EVENT";
+  type?: "KALARI";
 }
 
 const publicShowBookingHref = (show: PublicShow) => {
@@ -54,12 +55,13 @@ const Schedule: React.FC = () => {
       const query = db
         .from("shows")
         .select("*")
+        .in("status", ["ACTIVE", "HOUSE_FULL"])
         .gte("date", todayDateValue())
         .order("date", { ascending: true });
 
       const { data } = await query;
       setShows(
-        (data || []).filter((show: PublicShow) => isShowBookableAt(show)),
+        (data || []).filter((show: PublicShow) => isShowPubliclyAccessible(show)),
       );
     } catch (error) {
       console.error("Error fetching shows:", error);
@@ -75,7 +77,7 @@ const Schedule: React.FC = () => {
       const searchableText = [
         show.title,
         show.description,
-        show.type === "EVENT" ? "event special event" : "kalari show",
+        "kalari show",
         show.status,
       ]
         .filter(Boolean)
@@ -215,11 +217,6 @@ const Schedule: React.FC = () => {
                                   )}
                             </span>
                           </div>
-                          {show.type === "EVENT" && (
-                            <div className="absolute bottom-4 right-4 bg-purple-600 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg">
-                              Special Event
-                            </div>
-                          )}
                         </div>
 
                         <div className="p-8 flex-1 flex flex-col">

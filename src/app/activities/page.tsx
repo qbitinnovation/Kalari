@@ -9,6 +9,7 @@ import { PublicHero } from "@/components/PublicHero";
 import { DatePicker, Pagination, SearchInput } from "@/components/ui";
 import { todayDateValue } from "@/components/ui/date-utils";
 import { activityImages } from "@/lib/seedData";
+import { formatActivityDateRange, isActivityPubliclyBookable, isActivityPubliclyVisible } from "@/lib/activityAvailability";
 import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = {
@@ -18,7 +19,9 @@ type Activity = {
   title: string;
   category: string;
   location: string;
-  duration: string;
+  duration?: string;
+  start_date?: string;
+  end_date?: string;
   price: number;
   rating: number;
   review_count: number;
@@ -46,10 +49,8 @@ export default function ActivitiesPage() {
       .then((response) => response.json())
       .then((payload) => {
         setActivities(
-          (payload?.data || []).filter(
-            (activity: Activity) =>
-              activity.booking_status !== "PAUSED" &&
-              Number(activity.daily_capacity || 20) > 0,
+          (payload?.data || []).filter((activity: Activity) =>
+            isActivityPubliclyVisible(activity),
           ),
         );
       })
@@ -172,7 +173,8 @@ export default function ActivitiesPage() {
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Clock className="h-4 w-4" />{" "}
-                    {toDisplayTitle(activity.duration)}
+                    {formatActivityDateRange(activity) ||
+                      toDisplayTitle(activity.duration || "Flexible dates")}
                   </span>
                 </div>
                 <p className="mt-3 line-clamp-2 text-sm font-medium leading-6 text-slate-600">
@@ -185,10 +187,16 @@ export default function ActivitiesPage() {
                   </span>
                   <span className="font-black">Rs. {activity.price}</span>
                 </div>
-                <Link href={activityHref(activity)} className="btn-gradient-primary mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black text-white shadow-lg shadow-amber-900/10">
-                  Book Now
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </Link>
+                {isActivityPubliclyBookable(activity) ? (
+                  <Link href={activityHref(activity)} className="btn-gradient-primary mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black text-white shadow-lg shadow-amber-900/10">
+                    Book Now
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </Link>
+                ) : (
+                  <div className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-slate-100 px-5 py-3 text-sm font-black text-slate-500">
+                    Booking unavailable
+                  </div>
+                )}
               </div>
             </article>
           ))}

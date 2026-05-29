@@ -57,8 +57,6 @@ export const parseSeatCodes = (seatCode: unknown): string[] => {
 };
 
 export const getShowCapacity = (show: any): number => {
-  if (show?.type === "EVENT") return Number(show?.capacity || 0);
-
   const rawSections = show?.layout?.structure?.sections || [];
   const sections = isArenaLayout(rawSections) ? getSymmetricArenaSections(rawSections) : rawSections;
   return sections.reduce((total: number, section: any) => {

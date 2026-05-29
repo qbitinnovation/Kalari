@@ -39,11 +39,14 @@ import {
   isShowBookableAt,
   parseSeatCodes,
 } from "@/lib/booking";
+import { isActivityPubliclyBookable, isActivityPubliclyVisible } from "@/lib/activityAvailability";
+import { Input, IndianPhoneField } from "@/components/ui";
+import { getIndianMobileDigits } from "@/lib/indianPhone";
 import {
-  calculateEventCommission,
-  getCommissionPeriodKey,
-} from "@/lib/agentCommission";
-
+  getBookingCustomerErrors,
+  hasBookingCustomerErrors,
+  normalizeBookingPhone,
+} from "@/lib/bookingCustomer";
 const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "";
 
 declare global {
@@ -77,10 +80,6 @@ interface Show {
   available_count?: number;
   availability_status?: "AVAILABLE" | "FILLING_FAST" | "SOLD_OUT";
   layout?: { structure: any };
-  type?: "KALARI" | "EVENT";
-  capacity?: number;
-  agent_id?: string;
-  agent_commission_percentage?: number;
 }
 
 interface Activity {
@@ -156,7 +155,6 @@ const BookingContent: React.FC = () => {
   const [selectedShow, setSelectedShow] = useState<Show | null>(null);
   const [bookedSeats, setBookedSeats] = useState<Set<string>>(new Set());
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
-  const [eventTicketCount, setEventTicketCount] = useState<number>(1);
   const [step, setStep] = useState<Step>("show");
   const [form, setForm] = useState<BookingForm>({
     name: "",
@@ -200,8 +198,8 @@ const BookingContent: React.FC = () => {
       }
       setCustomerSession(parsed);
       setForm({
-        name: parsed.name || "Guest Customer",
-        phone: parsed.phone || "",
+        name: parsed.name && parsed.name !== "Guest Customer" ? parsed.name : "",
+        phone: getIndianMobileDigits(parsed.phone || ""),
         email: parsed.email || "",
       });
       setAuthChecked(true);
@@ -230,7 +228,6 @@ const BookingContent: React.FC = () => {
 
     setSelectedShow(show);
     setSelectedSeats([]);
-    setEventTicketCount(1);
     setStep("seats");
   }, [selectedShow, shows, validPreselectedShowId]);
 
@@ -247,7 +244,6 @@ const BookingContent: React.FC = () => {
 
       setSelectedShow(show);
       setSelectedSeats(Array.isArray(pending.selectedSeats) ? pending.selectedSeats : []);
-      setEventTicketCount(Number(pending.eventTicketCount || 1));
       setStep("details");
       sessionStorage.removeItem(PENDING_BOOKING_KEY);
     } catch {
@@ -269,7 +265,6 @@ const BookingContent: React.FC = () => {
     setShows(
       (data || []).filter(
         (show: Show) =>
-          show.type === "KALARI" &&
           isShowBookableAt(show) &&
           show.availability_status !== "SOLD_OUT" &&
           Number(show.available_count ?? 1) > 0,
@@ -284,10 +279,8 @@ const BookingContent: React.FC = () => {
       const response = await fetch("/api/activities?status=ACTIVE");
       const payload = await response.json().catch(() => ({}));
       setActivities(
-        (payload?.data || []).filter(
-          (activity: Activity) =>
-            activity.booking_status !== "PAUSED" &&
-            Number(activity.daily_capacity || 20) > 0,
+        (payload?.data || []).filter((activity: Activity) =>
+          isActivityPubliclyVisible(activity),
         ),
       );
     } catch {
@@ -365,14 +358,10 @@ const BookingContent: React.FC = () => {
   }, [selectedShow]);
 
   const sectionNames = Array.from(new Set(seats.map((seat) => seat.section)));
-  const totalTickets =
-    selectedShow?.type === "EVENT" ? eventTicketCount : selectedSeats.length;
-  const selectedSeatLabels =
-    selectedShow?.type === "EVENT"
-      ? `${eventTicketCount} general admission ticket(s)`
-      : selectedSeats
-          .map((id) => seats.find((seat) => seat.id === id)?.label || id)
-          .join(", ");
+  const totalTickets = selectedSeats.length;
+  const selectedSeatLabels = selectedSeats
+    .map((id) => seats.find((seat) => seat.id === id)?.label || id)
+    .join(", ");
   const totalAmount = selectedShow
     ? totalTickets * Number(selectedShow.price || 0)
     : 0;
@@ -615,15 +604,26 @@ const BookingContent: React.FC = () => {
   };
 
   const validateDetails = () => {
-    const nextErrors: Partial<BookingForm> = {};
-    if (!form.name.trim()) nextErrors.name = "Name is required.";
-    if (!form.phone.trim()) nextErrors.phone = "Phone is required.";
-    else if (!/^[0-9+\s-]{10,}$/.test(form.phone))
-      nextErrors.phone = "Enter a valid phone number.";
-    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
-      nextErrors.email = "Enter a valid email address.";
+    const nextErrors = getBookingCustomerErrors({
+      name: form.name,
+      phone: form.phone,
+      email: form.email,
+    });
     setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    return !hasBookingCustomerErrors(nextErrors);
+  };
+
+  const syncCustomerProfile = async (customerId: string) => {
+    const name = form.name.trim();
+    const phone = normalizeBookingPhone(form.phone);
+    const email = form.email.trim();
+    const now = new Date().toISOString();
+    await db.from("customers").update({ name, phone, email, updated_at: now }).eq("id", customerId);
+    if (customerSession) {
+      const nextSession = { ...customerSession, name, phone, email: email || undefined };
+      localStorage.setItem(CUSTOMER_SESSION_KEY, JSON.stringify(nextSession));
+      setCustomerSession(nextSession);
+    }
   };
 
   const getUnavailableSeats = async () => {
@@ -645,26 +645,6 @@ const BookingContent: React.FC = () => {
     return unavailable;
   };
 
-  const getConfirmedTicketCount = async () => {
-    if (!selectedShow) return 0;
-    const { data } = await db
-      .from("bookings")
-      .select("seat_code")
-      .eq("show_id", getRecordId(selectedShow))
-      .in("status", ["CONFIRMED", "HELD"]);
-
-    return (
-      data?.reduce(
-        (count: number, booking: any) =>
-          count +
-          (isActiveBookingReservation(booking)
-            ? parseSeatCodes(booking.seat_code).length
-            : 0),
-        0,
-      ) || 0
-    );
-  };
-
   const verifySeatAvailability = async () => {
     if (!selectedShow) return false;
     if (!isShowBookableAt(selectedShow)) {
@@ -673,18 +653,6 @@ const BookingContent: React.FC = () => {
       setStep("show");
       await fetchShows();
       return false;
-    }
-
-    if (selectedShow.type === "EVENT") {
-      const bookedCount = await getConfirmedTicketCount();
-      const capacity = selectedShow.capacity || 1000;
-      if (bookedCount + eventTicketCount > capacity) {
-        setNotice(
-          `Only ${Math.max(0, capacity - bookedCount)} tickets left. Please reduce your quantity.`,
-        );
-        return false;
-      }
-      return true;
     }
 
     const unavailable = await getUnavailableSeats();
@@ -702,20 +670,31 @@ const BookingContent: React.FC = () => {
   };
 
   const findOrCreateCustomer = async () => {
-    if (customerSession?.id) return customerSession.id;
+    const name = form.name.trim();
+    const phone = normalizeBookingPhone(form.phone);
+    const email = form.email.trim();
+
+    if (customerSession?.id) {
+      await syncCustomerProfile(customerSession.id);
+      return customerSession.id;
+    }
 
     const { data: existingCustomers } = await db
       .from("customers")
       .select("*")
-      .eq("phone", form.phone.trim());
-    if (existingCustomers?.[0]) return getRecordId(existingCustomers[0]);
+      .eq("phone", phone);
+    if (existingCustomers?.[0]) {
+      const customerId = getRecordId(existingCustomers[0]);
+      await db.from("customers").update({ name, email, updated_at: new Date().toISOString() }).eq("id", customerId);
+      return customerId;
+    }
 
     const now = new Date().toISOString();
     const { data: customers, error } = await db.from("customers").insert([
       {
-        name: form.name.trim(),
-        phone: form.phone.trim(),
-        email: form.email.trim(),
+        name,
+        phone,
+        email,
         created_at: now,
         updated_at: now,
       },
@@ -740,32 +719,10 @@ const BookingContent: React.FC = () => {
     const now = new Date().toISOString();
     const bookingReference = createBookingReference(new Date(now));
 
-    let seatCodesToSave = selectedSeats;
-    if (selectedShow.type === "EVENT") {
-      seatCodesToSave = Array.from({ length: eventTicketCount }).map(
-        () => "GENERAL",
-      );
-    }
+    const seatCodesToSave = selectedSeats;
     const generatedTicketCodes = createTicketCodes(
       seatCodesToSave.length,
       new Date(now),
-    );
-    const linkedAgent =
-      selectedShow.type === "EVENT" && selectedShow.agent_id
-        ? (
-            await db
-              .from("agents")
-              .select("payout_frequency")
-              .eq("id", selectedShow.agent_id)
-          ).data?.[0]
-        : null;
-    const commissionPercentage =
-      selectedShow.type === "EVENT" && selectedShow.agent_id
-        ? Number(selectedShow.agent_commission_percentage || 0)
-        : 0;
-    const commissionAmount = calculateEventCommission(
-      totalAmount,
-      commissionPercentage,
     );
 
     const { data: bookings, error: bookingError } = await db
@@ -785,20 +742,11 @@ const BookingContent: React.FC = () => {
           payment_method: method === "cod" ? "COD" : "RAZORPAY",
           payment_status: status,
           total_amount: totalAmount,
-          agent_id:
-            selectedShow.type === "EVENT"
-              ? selectedShow.agent_id || null
-              : null,
-          agent_commission_percentage: commissionPercentage,
-          commission_amount: commissionAmount,
-          commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
-          commission_period_key:
-            commissionAmount > 0
-              ? getCommissionPeriodKey(
-                  new Date(now),
-                  linkedAgent?.payout_frequency || "DAILY",
-                )
-              : null,
+          agent_id: null,
+          agent_commission_percentage: 0,
+          commission_amount: 0,
+          commission_status: "PAID",
+          commission_period_key: null,
           cancellation_status: "NONE",
         },
       ]);
@@ -856,11 +804,7 @@ const BookingContent: React.FC = () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         showId: getRecordId(selectedShow),
-        seatCodes: selectedShow.type === "EVENT" ? [] : selectedSeats,
-        ticketCount:
-          selectedShow.type === "EVENT"
-            ? eventTicketCount
-            : selectedSeats.length,
+        seatCodes: selectedSeats,
         form: { ...form, customerId: customerSession?.id },
       }),
     });
@@ -952,7 +896,7 @@ const BookingContent: React.FC = () => {
           amount: orderPayload.data.amount,
           currency: orderPayload.data.currency,
           name: "Experience Booking",
-          description: `${selectedShow.title} - ${selectedShow.type === "EVENT" ? eventTicketCount : selectedSeats.length} ticket(s)`,
+          description: `${selectedShow.title} - ${selectedSeats.length} ticket(s)`,
           order_id: orderPayload.data.id,
           prefill: {
             name: form.name.trim(),
@@ -1031,7 +975,6 @@ const BookingContent: React.FC = () => {
       JSON.stringify({
         showId: getRecordId(selectedShow),
         selectedSeats,
-        eventTicketCount,
       }),
     );
     const showId = encodeURIComponent(getRecordId(selectedShow));
@@ -1139,10 +1082,7 @@ const BookingContent: React.FC = () => {
                     Loading bookable experiences...
                   </div>
                 ) : shows.filter(
-                    (show) =>
-                      (!preselectedDate || show.date === preselectedDate) &&
-                      (!preselectedActivityId ||
-                        (show as any).activity_id === preselectedActivityId),
+                    (show) => !preselectedDate || show.date === preselectedDate,
                   ).length === 0 &&
                   activities.filter((activity) =>
                     !preselectedActivityId || getRecordId(activity) === preselectedActivityId || activity.slug === preselectedActivityId
@@ -1154,10 +1094,7 @@ const BookingContent: React.FC = () => {
                   <>
                     {shows
                       .filter(
-                        (show) =>
-                          (!preselectedDate || show.date === preselectedDate) &&
-                          (!preselectedActivityId ||
-                            (show as any).activity_id === preselectedActivityId),
+                        (show) => !preselectedDate || show.date === preselectedDate,
                       )
                       .map((show) => (
                       <button
@@ -1168,7 +1105,6 @@ const BookingContent: React.FC = () => {
                             setSelectedShow(show);
                             setBookedSeats(new Set());
                             setSelectedSeats([]);
-                            setEventTicketCount(1);
                             setStep("seats");
                           }
                         }}
@@ -1182,12 +1118,8 @@ const BookingContent: React.FC = () => {
                         />
                         <div className="flex flex-1 flex-col p-5">
                           <div className="mb-3 grid grid-cols-2 gap-2 text-xs font-bold sm:flex sm:flex-wrap">
-                            <span
-                              className={`truncate rounded-full px-3 py-1 text-center sm:text-left ${show.type === "EVENT" ? "bg-purple-50 text-purple-800" : "bg-emerald-50 text-emerald-800"}`}
-                            >
-                              {show.type === "EVENT"
-                                ? "Special Event"
-                                : "Kalari Show"}
+                            <span className="truncate rounded-full bg-emerald-50 px-3 py-1 text-center text-emerald-800 sm:text-left">
+                              Kalari Show
                             </span>
                             <span
                               className={`truncate rounded-full px-3 py-1 text-center sm:text-left ${show.availability_status === "SOLD_OUT" ? "bg-red-50 text-red-800" : show.availability_status === "FILLING_FAST" ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"}`}
@@ -1283,43 +1215,9 @@ const BookingContent: React.FC = () => {
 
             {step === "seats" && selectedShow && (
               <div className="pb-6">
-                {selectedShow.type === "EVENT" ? (
-                  <div className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-stone-200">
-                    <h3 className="mb-4 text-lg font-bold">
-                      Number of Tickets
-                    </h3>
-                    <div className="flex items-center gap-4">
-                      <button
-                        onClick={() =>
-                          setEventTicketCount(Math.max(1, eventTicketCount - 1))
-                        }
-                        className="flex h-12 w-12 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-xl font-bold text-stone-700 transition hover:bg-stone-100"
-                      >
-                        -
-                      </button>
-                      <span className="text-2xl font-black text-stone-950">
-                        {eventTicketCount}
-                      </span>
-                      <button
-                        onClick={() =>
-                          setEventTicketCount(
-                            Math.min(
-                              selectedShow.capacity || 1000,
-                              eventTicketCount + 1,
-                            ),
-                          )
-                        }
-                        className="flex h-12 w-12 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-xl font-bold text-stone-700 transition hover:bg-stone-100"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div key={getRecordId(selectedShow)}>
-                    {renderGuestKalariSeatMap()}
-                  </div>
-                )}
+                <div key={getRecordId(selectedShow)}>
+                  {renderGuestKalariSeatMap()}
+                </div>
 
                 <div className="sticky bottom-0 z-50 -mx-4 mt-5 border-t border-stone-200 bg-[#f7f3eb]/95 px-4 py-4 shadow-none backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
                   <PrimaryButton
@@ -1340,20 +1238,41 @@ const BookingContent: React.FC = () => {
                 <div className="rounded-lg bg-white p-5 shadow-sm ring-1 ring-stone-200">
                   <div className="mb-5">
                     <h3 className="text-2xl font-bold text-stone-950">
-                      Booking account
+                      Guest details
                     </h3>
                     <p className="mt-1 text-sm font-medium text-stone-500">
-                      Tickets will be saved to your logged-in customer account.
+                      Name and mobile are required. Email is optional.
                     </p>
                   </div>
-                  <div className="grid gap-3 rounded-lg bg-stone-50 p-4 sm:grid-cols-2">
-                    <Info label="Name" value={customerSession.name || "Customer"} />
-                    <Info label="Mobile" value={customerSession.phone} mono />
-                    {customerSession.email && (
-                      <div className="sm:col-span-2">
-                        <Info label="Email" value={customerSession.email} />
-                      </div>
-                    )}
+                  <div className="space-y-4">
+                    <Input
+                      variant="public"
+                      label="Full name"
+                      value={form.name}
+                      onChange={(name) => setForm({ ...form, name })}
+                      placeholder="Enter your full name"
+                      required
+                      error={errors.name}
+                      inputClassName="rounded-lg border border-stone-200 px-4 py-3 font-semibold"
+                    />
+                    <IndianPhoneField
+                      variant="public"
+                      label="Mobile number"
+                      value={form.phone}
+                      onChange={(phone) => setForm({ ...form, phone })}
+                      required
+                      error={errors.phone}
+                    />
+                    <Input
+                      variant="public"
+                      label="Email (optional)"
+                      type="email"
+                      value={form.email}
+                      onChange={(email) => setForm({ ...form, email })}
+                      placeholder="you@example.com"
+                      error={errors.email}
+                      inputClassName="rounded-lg border border-stone-200 px-4 py-3 font-semibold"
+                    />
                   </div>
                 </div>
                 <div className="fixed inset-x-0 bottom-0 z-50 border-t border-stone-200 bg-white p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] sm:relative sm:inset-auto sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
@@ -1421,15 +1340,9 @@ const BookingContent: React.FC = () => {
                   showTitle={selectedShow.title}
                   date={formatDisplayDateValue(selectedShow.date, "N/A")}
                   time={formatDisplayTimeValue(selectedShow.time, "N/A")}
-                  guestName={form.name}
-                  admissionLabel={
-                    selectedShow.type === "EVENT" ? "Admission" : "Seats"
-                  }
-                  admissionValue={
-                    selectedShow.type === "EVENT"
-                      ? `GENERAL${ticketCodes.length > 1 ? ` x ${ticketCodes.length}` : ""}`
-                      : selectedSeatLabels
-                  }
+                  guestName={form.name.trim() || customerSession?.name || "Guest"}
+                  admissionLabel="Seats"
+                  admissionValue={selectedSeatLabels}
                   quantity={`${totalTickets} ticket(s)`}
                   total={`Rs. ${totalAmount}`}
                   payment={
@@ -1461,33 +1374,19 @@ const BookingContent: React.FC = () => {
                           : "COD pending"
                       }
                     />
-                    <Info label="Guest" value={form.name} />
+                    <Info label="Guest" value={form.name.trim() || customerSession?.name || "Guest"} />
                     <Info label="Total" value={`Rs. ${totalAmount}`} />
                     <div className="sm:col-span-2">
-                      <Info
-                        label={
-                          selectedShow.type === "EVENT" ? "Tickets" : "Seats"
-                        }
-                        value={selectedSeatLabels}
-                      />
+                      <Info label="Seats" value={selectedSeatLabels} />
                     </div>
-                    {selectedShow.type === "EVENT" ? (
+                    {ticketCodes.length > 0 && (
                       <div className="sm:col-span-2">
                         <Info
-                          label="Admission"
-                          value={`GENERAL${ticketCodes.length > 1 ? ` x ${ticketCodes.length}` : ""}`}
+                          label="Ticket Codes"
+                          value={ticketCodes.join(", ")}
+                          mono
                         />
                       </div>
-                    ) : (
-                      ticketCodes.length > 0 && (
-                        <div className="sm:col-span-2">
-                          <Info
-                            label="Ticket Codes"
-                            value={ticketCodes.join(", ")}
-                            mono
-                          />
-                        </div>
-                      )
                     )}
                   </div>
                   <div className="mx-auto mt-6 flex w-fit rounded-lg bg-white p-3 shadow-sm">

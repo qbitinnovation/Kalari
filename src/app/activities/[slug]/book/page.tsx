@@ -7,9 +7,20 @@ import { ArrowLeft, CalendarDays, CheckCircle2, Minus, Plus, Printer, Ticket } f
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import PublicNavbar from "@/components/PublicNavbar";
 import { PublicFooter } from "@/components/PublicFooter";
-import { Button, DatePicker, Select } from "@/components/ui";
+import { Button, DatePicker, Input, IndianPhoneField, Select } from "@/components/ui";
+import { getIndianMobileDigits } from "@/lib/indianPhone";
+import {
+  getBookingCustomerErrors,
+  hasBookingCustomerErrors,
+  normalizeBookingPhone,
+} from "@/lib/bookingCustomer";
 import { formatDisplayDateValue, todayDateValue } from "@/components/ui/date-utils";
 import { getBookingReference } from "@/lib/booking";
+import {
+  formatActivityDateRange,
+  isActivityPubliclyBookable,
+  isActivityPubliclyVisible,
+} from "@/lib/activityAvailability";
 import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = any;
@@ -35,6 +46,7 @@ export default function ActivityBookingPage() {
   const [ticketCount, setTicketCount] = useState(1);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [customer, setCustomer] = useState({ name: "", phone: "", email: "" });
+  const [customerErrors, setCustomerErrors] = useState({ name: "", phone: "", email: "" });
   const [paymentMethod, setPaymentMethod] = useState("COD");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,7 +79,11 @@ export default function ActivityBookingPage() {
         return;
       }
       setCustomerSession(parsed);
-      setCustomer({ name: parsed.name || "Guest Customer", phone: parsed.phone || "", email: parsed.email || "" });
+      setCustomer({
+        name: parsed.name && parsed.name !== "Guest Customer" ? parsed.name : "",
+        phone: getIndianMobileDigits(parsed.phone || ""),
+        email: parsed.email || "",
+      });
       setAuthChecked(true);
     } catch {
       localStorage.removeItem(CUSTOMER_SESSION_KEY);
@@ -122,9 +138,22 @@ export default function ActivityBookingPage() {
       router.push(`/customer/login?redirect=${encodeURIComponent(nextPath)}`);
       return;
     }
+
+    const nextErrors = getBookingCustomerErrors(customer);
+    setCustomerErrors(nextErrors);
+    if (hasBookingCustomerErrors(nextErrors)) {
+      setNotice(nextErrors.name || nextErrors.phone || nextErrors.email || "Enter your name and mobile number.");
+      return;
+    }
+
     setSaving(true);
     setNotice("");
     try {
+      const payloadCustomer = {
+        name: customer.name.trim(),
+        phone: normalizeBookingPhone(customer.phone),
+        email: customer.email.trim(),
+      };
       const response = await fetch("/api/activity-bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -133,7 +162,7 @@ export default function ActivityBookingPage() {
           date,
           ticketCount,
           customerId: customerSession.id,
-          customer,
+          customer: payloadCustomer,
           paymentMethod,
         }),
       });
@@ -158,12 +187,13 @@ export default function ActivityBookingPage() {
     );
   }
 
-  if (!activity) {
+  if (!activity || !isActivityPubliclyVisible(activity)) {
     return (
       <main className="min-h-screen bg-[#f7f3eb] text-[#10284a]">
         <PublicNavbar />
         <div className="mx-auto max-w-3xl px-4 pb-24 pt-32 text-center">
           <h1 className="text-4xl font-black">Activity unavailable</h1>
+          <p className="mt-3 font-semibold text-stone-500">This activity is no longer available.</p>
           <Link href="/activities" className="mt-6 inline-flex rounded-full bg-stone-950 px-7 py-3 font-black text-white">Back to activities</Link>
         </div>
       </main>
@@ -171,7 +201,14 @@ export default function ActivityBookingPage() {
   }
 
   const bookingReference = success?.booking ? getBookingReference(success.booking) : "";
-  const canBookActivity = activity.booking_status !== "PAUSED" && Number(activity.daily_capacity || 20) > 0;
+  const canBookActivity = activity ? isActivityPubliclyBookable(activity) : false;
+  const bookingMinDate = activity?.start_date
+    ? String(activity.start_date).slice(0, 10)
+    : todayDateValue();
+  const bookingMaxDate = activity?.end_date
+    ? String(activity.end_date).slice(0, 10)
+    : undefined;
+  const dateRangeLabel = activity ? formatActivityDateRange(activity) : "";
 
   return (
     <main className="min-h-screen bg-[#f7f3eb] text-[#10284a] print:bg-white">
@@ -183,7 +220,7 @@ export default function ActivityBookingPage() {
           bookingReference={bookingReference}
           activityTitle={toDisplayTitle(activity.title)}
           date={formatDisplayDateValue(date, "N/A")}
-          guestName={customer.name || "Guest"}
+          guestName={customer.name.trim() || customerSession?.name || "Guest"}
           admissionValue={`GENERAL x ${success.tickets?.length || ticketCount}`}
           quantity={`${success.tickets?.length || ticketCount} ticket(s)`}
           total={`Rs. ${total.toLocaleString("en-IN")}`}
@@ -243,10 +280,20 @@ export default function ActivityBookingPage() {
                 <p className="text-xs font-black uppercase tracking-widest text-primary-600">Activity booking</p>
                 <h2 className="mt-2 text-3xl font-black">Reserve general tickets</h2>
                 <p className="mt-2 text-sm font-semibold text-stone-500">Admission is GENERAL. Your QR uses one booking reference.</p>
+                {dateRangeLabel ? (
+                  <p className="mt-2 text-sm font-bold text-stone-600">Available: {dateRangeLabel}</p>
+                ) : null}
               </div>
               {notice && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700">{notice}</div>}
               <div className="grid gap-4 sm:grid-cols-2">
-                <DatePicker label="Select Date" value={date} onChange={setDate} minDate={todayDateValue()} variant="public" />
+                <DatePicker
+                  label="Select Date"
+                  value={date}
+                  onChange={setDate}
+                  minDate={bookingMinDate > todayDateValue() ? bookingMinDate : todayDateValue()}
+                  maxDate={bookingMaxDate}
+                  variant="public"
+                />
                 <Select
                   label="Payment"
                   value={paymentMethod}
@@ -272,11 +319,36 @@ export default function ActivityBookingPage() {
                 </div>
               </div>
               {customerSession ? (
-                <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-                  <div className="mb-3 text-sm font-black">Booking account</div>
-                  <Info label="Name" value={customerSession.name || "Customer"} />
-                  <Info label="Mobile" value={customerSession.phone} mono />
-                  {customerSession.email && <Info label="Email" value={customerSession.email} />}
+                <div className="space-y-4 rounded-lg border border-stone-200 bg-stone-50 p-4">
+                  <div className="text-sm font-black">Guest details</div>
+                  <Input
+                    variant="public"
+                    label="Full name"
+                    value={customer.name}
+                    onChange={(name) => setCustomer({ ...customer, name })}
+                    placeholder="Enter your full name"
+                    required
+                    error={customerErrors.name}
+                    inputClassName="rounded-lg border border-stone-200 px-4 py-3 font-semibold"
+                  />
+                  <IndianPhoneField
+                    variant="public"
+                    label="Mobile number"
+                    value={customer.phone}
+                    onChange={(phone) => setCustomer({ ...customer, phone })}
+                    required
+                    error={customerErrors.phone}
+                  />
+                  <Input
+                    variant="public"
+                    label="Email (optional)"
+                    type="email"
+                    value={customer.email}
+                    onChange={(email) => setCustomer({ ...customer, email })}
+                    placeholder="you@example.com"
+                    error={customerErrors.email}
+                    inputClassName="rounded-lg border border-stone-200 px-4 py-3 font-semibold"
+                  />
                 </div>
               ) : (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-left">

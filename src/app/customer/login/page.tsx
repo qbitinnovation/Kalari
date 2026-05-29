@@ -14,7 +14,17 @@ import {
   Phone,
   ShieldCheck,
 } from "lucide-react";
-import { Input } from "@/components/ui";
+import { IndianPhoneField, Input } from "@/components/ui";
+import {
+  formatIndianMobileDisplay,
+  formatIndianMobileForStorage,
+  getIndianMobileDigits,
+  getIndianMobileValidationError,
+} from "@/lib/indianPhone";
+import {
+  getBookingEmailError,
+  getBookingNameError,
+} from "@/lib/bookingCustomer";
 
 type CustomerSession = {
   id: string;
@@ -43,10 +53,15 @@ export default function CustomerLoginPage() {
   const router = useRouter();
   const [redirectPath, setRedirectPath] = useState("/customer");
   const [phone, setPhone] = useState("");
+  const [phoneError, setPhoneError] = useState("");
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [registrationToken, setRegistrationToken] = useState("");
+  const [registrationName, setRegistrationName] = useState("");
+  const [registrationEmail, setRegistrationEmail] = useState("");
+  const [registrationNameError, setRegistrationNameError] = useState("");
+  const [registrationEmailError, setRegistrationEmailError] = useState("");
   const [debugOtp, setDebugOtp] = useState("");
   const [step, setStep] = useState<LoginStep>("phone");
   const [loading, setLoading] = useState(false);
@@ -66,13 +81,16 @@ export default function CustomerLoginPage() {
     router.replace(redirectPath);
   };
 
+  const getApiPhone = () => formatIndianMobileForStorage(phone);
+  const phoneLabel = formatIndianMobileDisplay(phone) || phone;
+
   const sendOtp = async (
     nextNotice = "OTP sent. Use the test code shown below.",
   ) => {
     const response = await fetch("/api/customer/request-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({ phone: getApiPhone() }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Could not send OTP.");
@@ -83,6 +101,10 @@ export default function CustomerLoginPage() {
 
   const checkPhone = async (event: React.FormEvent) => {
     event.preventDefault();
+    const nextPhoneError = getIndianMobileValidationError(phone, true);
+    setPhoneError(nextPhoneError);
+    if (nextPhoneError) return;
+
     setLoading(true);
     setNotice("");
     setOtp("");
@@ -91,16 +113,17 @@ export default function CustomerLoginPage() {
     setDebugOtp("");
     setRegistrationToken("");
     try {
+      const formattedPhone = formatIndianMobileForStorage(phone);
       const response = await fetch("/api/customer/check-phone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone: formattedPhone }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok)
         throw new Error(payload.error || "Could not check this phone number.");
 
-      setPhone(payload.data.phone);
+      setPhone(getIndianMobileDigits(payload.data.phone));
       setHasPassword(Boolean(payload.data.has_password));
       if (payload.data.exists) {
         setStep("choice");
@@ -144,7 +167,7 @@ export default function CustomerLoginPage() {
       const response = await fetch("/api/customer/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, code: otp }),
+        body: JSON.stringify({ phone: getApiPhone(), code: otp }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok)
@@ -152,11 +175,15 @@ export default function CustomerLoginPage() {
 
       if (payload.data?.mode === "register") {
         setRegistrationToken(payload.data.registration_token || "");
+        setRegistrationName("");
+        setRegistrationEmail("");
+        setRegistrationNameError("");
+        setRegistrationEmailError("");
         setPassword("");
         setConfirmPassword("");
         setStep("set-password");
         setNotice(
-          "Phone verified. Set your password to finish the account setup.",
+          "Phone verified. Enter your name and set a password to finish account setup.",
         );
         return;
       }
@@ -178,7 +205,7 @@ export default function CustomerLoginPage() {
       const response = await fetch("/api/customer/password-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, password }),
+        body: JSON.stringify({ phone: getApiPhone(), password }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.data?.customer)
@@ -193,6 +220,12 @@ export default function CustomerLoginPage() {
 
   const setCustomerPassword = async (event: React.FormEvent) => {
     event.preventDefault();
+    const nextNameError = getBookingNameError(registrationName);
+    const nextEmailError = getBookingEmailError(registrationEmail);
+    setRegistrationNameError(nextNameError);
+    setRegistrationEmailError(nextEmailError);
+    if (nextNameError || nextEmailError) return;
+
     setLoading(true);
     setNotice("");
     try {
@@ -205,9 +238,11 @@ export default function CustomerLoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phone,
+          phone: getApiPhone(),
           password,
           registration_token: registrationToken,
+          name: registrationName.trim(),
+          email: registrationEmail.trim(),
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -228,7 +263,12 @@ export default function CustomerLoginPage() {
     setConfirmPassword("");
     setDebugOtp("");
     setNotice("");
+    setPhoneError("");
     setRegistrationToken("");
+    setRegistrationName("");
+    setRegistrationEmail("");
+    setRegistrationNameError("");
+    setRegistrationEmailError("");
   };
 
   const title =
@@ -248,14 +288,14 @@ export default function CustomerLoginPage() {
     step === "phone"
       ? "Please enter your mobile number"
       : step === "choice"
-        ? `Choose a login method for ${phone}`
+        ? `Choose a login method for ${phoneLabel}`
         : step === "send-otp"
-          ? `Send a verification code to ${phone}`
+          ? `Send a verification code to ${phoneLabel}`
           : step === "password"
-            ? `Password login for ${phone}`
+            ? `Password login for ${phoneLabel}`
             : step === "set-password"
-              ? "Create a password for future logins"
-              : `Code sent to ${phone}`;
+              ? "Enter your name and create a password"
+              : `Code sent to ${phoneLabel}`;
 
   return (
     <main className="min-h-screen bg-[#f7f3eb] pt-24 text-stone-950">
@@ -313,13 +353,15 @@ export default function CustomerLoginPage() {
 
           {step === "phone" && (
             <form onSubmit={checkPhone} className="space-y-4">
-              <Input
+              <IndianPhoneField
                 variant="public"
                 label="Mobile number"
-                type="tel"
                 value={phone}
-                onChange={setPhone}
-                placeholder="+91 98765 43210"
+                onChange={(nextPhone) => {
+                  setPhone(nextPhone);
+                  if (phoneError) setPhoneError(getIndianMobileValidationError(nextPhone, true));
+                }}
+                error={phoneError}
                 required
               />
               <button
@@ -447,6 +489,32 @@ export default function CustomerLoginPage() {
 
           {step === "set-password" && (
             <form onSubmit={setCustomerPassword} className="space-y-4">
+              <Input
+                variant="public"
+                label="Full name"
+                value={registrationName}
+                onChange={(name) => {
+                  setRegistrationName(name);
+                  if (registrationNameError) setRegistrationNameError(getBookingNameError(name));
+                }}
+                placeholder="Enter your full name"
+                required
+                error={registrationNameError}
+                inputClassName="rounded-lg border border-stone-200 px-4 py-3 font-semibold"
+              />
+              <Input
+                variant="public"
+                label="Email (optional)"
+                type="email"
+                value={registrationEmail}
+                onChange={(email) => {
+                  setRegistrationEmail(email);
+                  if (registrationEmailError) setRegistrationEmailError(getBookingEmailError(email));
+                }}
+                placeholder="you@example.com"
+                error={registrationEmailError}
+                inputClassName="rounded-lg border border-stone-200 px-4 py-3 font-semibold"
+              />
               <PasswordField
                 label="Create password"
                 value={password}

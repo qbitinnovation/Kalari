@@ -11,7 +11,7 @@ import {
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { logActivity } from '@/utils/activityLogger'
 import { getBookingReference } from '@/lib/booking'
-import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, DatePicker } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableHead, AdminTablePanel, AdminTableSkeleton, DatePicker } from '@/components/ui'
 import { formatDisplayDateValue, formatDisplayTimeValue } from '@/components/ui/date-utils'
 
 interface BookingReport {
@@ -393,9 +393,45 @@ const Reports: React.FC = () => {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className={`h-20 rounded-xl animate-pulse ${darkMode ? 'bg-gray-700/50' : 'bg-gray-100'}`} />
+                ))}
+              </div>
+              <AdminTablePanel>
+                <AdminTable>
+                  <AdminTableHead>
+                    <tr>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Booking Ref
+                      </th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Seats
+                      </th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Tickets
+                      </th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Amount
+                      </th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Booked By
+                      </th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Booking Time
+                      </th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors duration-200 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Status
+                      </th>
+                    </tr>
+                  </AdminTableHead>
+                  <AdminTableBody>
+                    <AdminTableSkeleton columns={7} />
+                  </AdminTableBody>
+                </AdminTable>
+              </AdminTablePanel>
+            </>
           ) : (
             <>
               {/* Summary Cards */}

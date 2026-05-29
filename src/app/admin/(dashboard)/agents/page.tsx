@@ -2,18 +2,44 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Banknote, ChevronDown, Eye, Pencil, Phone, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, Banknote, Eye, MessageSquare, Pencil, Plus, Smartphone, Trash2, X } from "lucide-react";
 import { db, type Agent } from "@/lib/database";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, SearchInput, Select } from "@/components/ui";
+import { AdminTable, AdminTableBody, AdminTableCell, AdminTableEmpty, AdminTableHead, AdminTableHeaderCell, AdminTablePanel, AdminTableRow, AdminTableSkeleton, Button, IndianPhoneField, Input, SearchInput, Select } from "@/components/ui";
 import { formatDisplayDateValue } from "@/components/ui/date-utils";
-import { getAgentContact, getAgentDisplayName, normalizePayoutFrequency, type PayoutFrequency } from "@/lib/agentCommission";
+import {
+  formatIndianMobileDisplay,
+  formatIndianMobileForStorage,
+  getIndianMobileDigits,
+  INDIAN_MOBILE_ERROR,
+  isValidIndianMobileDigits,
+} from "@/lib/indianPhone";
+import {
+  getAgentContact,
+  getAgentDisplayName,
+  getAgentAlertMethod,
+  getAgentPayoutLabel,
+  agentUsesContactGpayPhone,
+  inferAgentPayoutMethod,
+  normalizeAgentNotificationMethod,
+  normalizePayoutFrequency,
+  normalizePayoutMethod,
+  type AgentNotificationMethod,
+  type PayoutFrequency,
+  type PayoutMethod,
+} from "@/lib/agentCommission";
+import { getAgentPublicId } from "@/lib/agentId";
 import { toDisplayInitial, toDisplayTitle } from "@/lib/textFormat";
 
 const emptyForm = {
   name: "",
   phone: "",
+  email: "",
+  alert_method: "SMS" as AgentNotificationMethod,
   payout_frequency: "MONTHLY" as PayoutFrequency,
+  payout_method: "GPAY" as PayoutMethod,
+  gpay_use_contact_phone: true,
+  gpay_phone: "",
   bank_account_name: "",
   bank_account_number: "",
   bank_ifsc: "",
@@ -22,16 +48,57 @@ const emptyForm = {
 };
 
 const recordId = (row: any) => String(row?.id || row?._id || "");
-const normalizeIndianPhone = (value: string) => {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length === 10) return digits;
-  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
-  return value.trim();
+
+const isBankPayoutComplete = (form: typeof emptyForm) =>
+  Boolean(
+    form.bank_account_name.trim() &&
+      form.bank_account_number.trim() &&
+      form.bank_ifsc.trim() &&
+      form.bank_name.trim()
+  );
+
+const getBankPayoutFieldErrors = (form: typeof emptyForm, showErrors: boolean) => {
+  if (!showErrors || form.payout_method !== "BANK") {
+    return {
+      bank_account_name: "",
+      bank_account_number: "",
+      bank_ifsc: "",
+      bank_name: "",
+    };
+  }
+  return {
+    bank_account_name: !form.bank_account_name.trim() ? "Account name is required." : "",
+    bank_account_number: !form.bank_account_number.trim() ? "Account number is required." : "",
+    bank_ifsc: !form.bank_ifsc.trim() ? "IFSC is required." : "",
+    bank_name: !form.bank_name.trim() ? "Bank name is required." : "",
+  };
 };
 
-const isValidIndianPhone = (value: string) => {
-  const digits = value.replace(/\D/g, "");
-  return digits.length === 10 || (digits.length === 12 && digits.startsWith("91"));
+const getGpayPayoutError = (form: typeof emptyForm, showErrors: boolean) => {
+  if (!showErrors || form.payout_method !== "GPAY") return "";
+  if (form.gpay_use_contact_phone) {
+    if (!form.phone.trim()) return "Enter a contact number above to use for GPay payout.";
+    if (!isValidIndianMobileDigits(form.phone)) return INDIAN_MOBILE_ERROR;
+    return "";
+  }
+  if (!form.gpay_phone.trim()) return "Enter the GPay mobile number.";
+  if (!isValidIndianMobileDigits(form.gpay_phone)) return INDIAN_MOBILE_ERROR;
+  return "";
+};
+
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+const notificationContactHint = (method: AgentNotificationMethod, phone: string, email: string) => {
+  if (method === "SMS") {
+    const contact = formatIndianMobileDisplay(phone);
+    return contact
+      ? `Agent alerts will be sent by text to ${contact}.`
+      : "Agent alerts will be sent by text to the contact number above.";
+  }
+  const address = email.trim();
+  return address
+    ? `Agent alerts will be sent by email to ${address}.`
+    : "Agent alerts will be sent by email to the email address above.";
 };
 
 export default function AgentsPage() {
@@ -41,8 +108,8 @@ export default function AgentsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [formData, setFormData] = useState(emptyForm);
-  const [bankDetailsOpen, setBankDetailsOpen] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
+  const [payoutSubmitted, setPayoutSubmitted] = useState(false);
   const [error, setError] = useState("");
   const darkMode = useDarkMode();
 
@@ -54,6 +121,7 @@ export default function AgentsPage() {
     setLoading(true);
     setError("");
     try {
+      await fetch("/api/agents/backfill", { method: "POST" }).catch(() => null);
       const { data, error } = await db.from("agents").select("*").order("name", { ascending: true });
       if (error) throw error;
       const legacy = await db.from("users").select("*").eq("role", "agent").order("full_name", { ascending: true });
@@ -75,36 +143,55 @@ export default function AgentsPage() {
   const openCreate = () => {
     setEditingAgent(null);
     setFormData(emptyForm);
-    setBankDetailsOpen(false);
+    setPayoutSubmitted(false);
     setShowForm(true);
   };
 
   const openEdit = (agent: Agent) => {
+    const payoutMethod = inferAgentPayoutMethod(agent);
+    const usesContactGpay = agentUsesContactGpayPhone(agent);
     setEditingAgent(agent);
+    setPayoutSubmitted(false);
     setFormData({
       name: getAgentDisplayName(agent),
-      phone: getAgentContact(agent),
+      phone: getIndianMobileDigits(getAgentContact(agent)),
+      email: agent.email || "",
+      alert_method: getAgentAlertMethod(agent),
       payout_frequency: normalizePayoutFrequency(agent.payout_frequency),
+      payout_method: payoutMethod,
+      gpay_use_contact_phone: usesContactGpay,
+      gpay_phone: usesContactGpay ? "" : getIndianMobileDigits(agent.gpay_phone || ""),
       bank_account_name: agent.bank_account_name || "",
       bank_account_number: agent.bank_account_number || "",
       bank_ifsc: agent.bank_ifsc || "",
       bank_name: agent.bank_name || "",
       active: agent.active !== false,
     });
-    setBankDetailsOpen(Boolean(agent.bank_account_name || agent.bank_account_number || agent.bank_ifsc || agent.bank_name));
     setShowForm(true);
   };
 
   const saveAgent = async (event: React.FormEvent) => {
     event.preventDefault();
+    setPayoutSubmitted(true);
     setFormLoading(true);
     setError("");
     try {
       const now = new Date().toISOString();
+      const alertMethod = normalizeAgentNotificationMethod(formData.alert_method);
+      const payoutMethod = normalizePayoutMethod(formData.payout_method);
+      const { alert_method: _alertMethod, active: _active, gpay_use_contact_phone, ...formRest } = formData;
       const payload = {
-        ...formData,
+        ...formRest,
         name: formData.name.trim(),
-        phone: normalizeIndianPhone(formData.phone),
+        phone: formatIndianMobileForStorage(formData.phone),
+        email: formData.email.trim().toLowerCase(),
+        commission_notification_method: alertMethod,
+        remaining_amount_notification_method: alertMethod,
+        payout_method: payoutMethod,
+        gpay_phone:
+          payoutMethod === "GPAY" && !gpay_use_contact_phone
+            ? formatIndianMobileForStorage(formData.gpay_phone)
+            : "",
         bank_account_name: formData.bank_account_name.trim(),
         bank_account_number: formData.bank_account_number.trim(),
         bank_ifsc: formData.bank_ifsc.trim(),
@@ -113,8 +200,16 @@ export default function AgentsPage() {
         updated_at: now,
       };
 
-      if (!payload.name || !payload.phone) throw new Error("Agent name and contact number are required.");
-      if (!isValidIndianPhone(formData.phone)) throw new Error("Enter a valid Indian mobile number. Use 10 digits or +91 followed by 10 digits.");
+      if (!payload.name || !formData.phone.trim()) throw new Error("Agent name and contact number are required.");
+      if (!isValidIndianMobileDigits(formData.phone)) throw new Error(INDIAN_MOBILE_ERROR);
+      if (alertMethod === "EMAIL" && !payload.email) throw new Error("Email is required when agent alerts are set to email.");
+      if (payload.email && !isValidEmail(payload.email)) throw new Error("Enter a valid email address.");
+      if (payoutMethod === "GPAY") {
+        const gpayError = getGpayPayoutError(formData, true);
+        if (gpayError) throw new Error(gpayError);
+      } else if (!isBankPayoutComplete(formData)) {
+        throw new Error("Fill in all bank details for bank transfer payout.");
+      }
 
       if (editingAgent) {
         const { error } = await db.from("agents").update(payload).eq("id", recordId(editingAgent));
@@ -127,6 +222,7 @@ export default function AgentsPage() {
       setShowForm(false);
       setEditingAgent(null);
       setFormData(emptyForm);
+      setPayoutSubmitted(false);
       await fetchAgents();
     } catch (error: any) {
       setError(error.message || "Could not save agent.");
@@ -149,20 +245,26 @@ export default function AgentsPage() {
   };
 
   const filteredAgents = agents.filter((agent) =>
-    `${getAgentDisplayName(agent)} ${getAgentContact(agent)} ${agent.bank_name || ""}`.toLowerCase().includes(searchTerm.toLowerCase())
+    `${getAgentDisplayName(agent)} ${getAgentContact(agent)} ${agent.email || ""} ${getAgentPayoutLabel(agent)}`.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><div className="h-12 w-12 animate-spin rounded-full border-b-2 border-amber-600" /></div>;
+  const phoneError = formData.phone.trim() && !isValidIndianMobileDigits(formData.phone) ? INDIAN_MOBILE_ERROR : "";
+  const gpayPayoutError = getGpayPayoutError(formData, payoutSubmitted);
+  const gpayPhoneError =
+    formData.payout_method === "GPAY" && !formData.gpay_use_contact_phone ? gpayPayoutError : "";
+  const gpayContactPayoutError =
+    formData.payout_method === "GPAY" && formData.gpay_use_contact_phone ? gpayPayoutError : "";
+  const bankFieldErrors = getBankPayoutFieldErrors(formData, payoutSubmitted);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Agents Management</h1>
-          <p className="text-sm opacity-60">Manage offline agents, bank details, and payout cycles</p>
+          <p className="text-sm opacity-60">Manage offline agents, payout details, and payout cycles</p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
-          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Filter agents by name, phone, or bank..." containerClassName="w-full sm:w-80" />
+          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Filter agents by name, phone, or payout..." containerClassName="w-full sm:w-80" />
           <Button onClick={openCreate}><Plus className="h-5 w-5" /> Add Agent</Button>
         </div>
       </div>
@@ -180,16 +282,30 @@ export default function AgentsPage() {
             <div className="admin-modal-header">
               <div>
                 <h2 className="admin-modal-title">{editingAgent ? "Edit Agent" : "Create Agent"}</h2>
-                <p className="admin-modal-subtitle">Add offline agent contact, bank details, and payout cycle.</p>
+                <p className="admin-modal-subtitle">Add offline agent contact, notification preference, payout method, and payout cycle.</p>
               </div>
               <button onClick={() => setShowForm(false)} className="admin-modal-close">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={saveAgent}>
+            <form onSubmit={saveAgent} className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="admin-modal-body grid gap-4 md:grid-cols-2">
-                <Field label="Agent Name" value={formData.name} onChange={(name) => setFormData({ ...formData, name })} placeholder="Enter agent name" required />
-                <Field label="Contact Number" value={formData.phone} onChange={(phone) => setFormData({ ...formData, phone })} placeholder="+91 98765 43210" inputMode="tel" required maxLength={17} />
+                <Input label="Agent Name" value={formData.name} onChange={(name) => setFormData({ ...formData, name })} placeholder="Enter agent name" required />
+                <IndianPhoneField
+                  label="Contact Number"
+                  value={formData.phone}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
+                  error={phoneError}
+                  required
+                />
+                <Input
+                  label="Email"
+                  value={formData.email}
+                  onChange={(email) => setFormData({ ...formData, email })}
+                  placeholder="agent@example.com"
+                  inputMode="email"
+                  required={formData.alert_method === "EMAIL"}
+                />
                 <Select
                   label="Payout Frequency"
                   value={formData.payout_frequency}
@@ -200,31 +316,113 @@ export default function AgentsPage() {
                     { value: "MONTHLY", label: "Monthly" },
                   ]}
                 />
-                <div className="md:col-span-2">
-                  <button
-                    type="button"
-                    onClick={() => setBankDetailsOpen((open) => !open)}
-                    className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-black transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Banknote className="h-4 w-4 text-emerald-600" />
-                      Bank Details
-                    </span>
-                    <ChevronDown className={`h-4 w-4 transition ${bankDetailsOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {bankDetailsOpen && (
-                    <div className="mt-4 grid gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-700 md:grid-cols-2">
-                      <Field label="Bank Account Name" value={formData.bank_account_name} onChange={(bank_account_name) => setFormData({ ...formData, bank_account_name })} placeholder="Enter account holder name" />
-                      <Field label="Bank Account Number" value={formData.bank_account_number} onChange={(bank_account_number) => setFormData({ ...formData, bank_account_number })} placeholder="123456789012" inputMode="numeric" />
-                      <Field label="IFSC" value={formData.bank_ifsc} onChange={(bank_ifsc) => setFormData({ ...formData, bank_ifsc: bank_ifsc.toUpperCase() })} placeholder="SBIN0001234" maxLength={11} />
-                      <Field label="Bank Name" value={formData.bank_name} onChange={(bank_name) => setFormData({ ...formData, bank_name })} placeholder="State Bank of India" />
+                <Select
+                  label="Agent Alerts Via"
+                  value={formData.alert_method}
+                  onChange={(alert_method) =>
+                    setFormData({ ...formData, alert_method: normalizeAgentNotificationMethod(alert_method) })
+                  }
+                  hint={notificationContactHint(formData.alert_method, formData.phone, formData.email)}
+                  className="md:col-span-2"
+                  options={[
+                    { value: "SMS", label: "Text message" },
+                    { value: "EMAIL", label: "Email" },
+                  ]}
+                />
+                <div className="md:col-span-2 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+                  <div className="mb-4">
+                    <div className="mb-2 text-sm font-black">Payout Method <span className="text-amber-600">*</span></div>
+                    <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayoutSubmitted(false);
+                          setFormData({ ...formData, payout_method: "GPAY" });
+                        }}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-black transition ${
+                          formData.payout_method === "GPAY"
+                            ? "bg-white text-emerald-700 shadow-sm dark:bg-slate-900"
+                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                        }`}
+                      >
+                        <Smartphone className="h-4 w-4" />
+                        Google Pay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayoutSubmitted(false);
+                          setFormData({ ...formData, payout_method: "BANK" });
+                        }}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-black transition ${
+                          formData.payout_method === "BANK"
+                            ? "bg-white text-emerald-700 shadow-sm dark:bg-slate-900"
+                            : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                        }`}
+                      >
+                        <Banknote className="h-4 w-4" />
+                        Bank Transfer
+                      </button>
+                    </div>
+                  </div>
+
+                  {formData.payout_method === "GPAY" ? (
+                    <div className="space-y-4">
+                      {gpayContactPayoutError && (
+                        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                          {gpayContactPayoutError}
+                        </div>
+                      )}
+                      <div className="space-y-3">
+                        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-700">
+                          <input
+                            type="radio"
+                            name="gpay_phone_source"
+                            checked={formData.gpay_use_contact_phone}
+                            onChange={() => setFormData({ ...formData, gpay_use_contact_phone: true, gpay_phone: "" })}
+                            className="mt-1"
+                          />
+                          <span>
+                            <span className="block text-sm font-black">Use contact number</span>
+                            <span className="mt-1 block text-xs font-semibold opacity-60">
+                              {formData.phone.trim() ? `Payouts will go to ${formatIndianMobileDisplay(formData.phone)}` : "Uses the contact number entered above."}
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-700">
+                          <input
+                            type="radio"
+                            name="gpay_phone_source"
+                            checked={!formData.gpay_use_contact_phone}
+                            onChange={() => setFormData({ ...formData, gpay_use_contact_phone: false })}
+                            className="mt-1"
+                          />
+                          <span className="block text-sm font-black">Use a different GPay number</span>
+                        </label>
+                      </div>
+                      {!formData.gpay_use_contact_phone && (
+                        <IndianPhoneField
+                          label="GPay Mobile Number"
+                          value={formData.gpay_phone}
+                          onChange={(gpay_phone) => setFormData({ ...formData, gpay_phone })}
+                          error={gpayPhoneError}
+                          required
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Input label="Bank Account Name" value={formData.bank_account_name} onChange={(bank_account_name) => setFormData({ ...formData, bank_account_name })} placeholder="Enter account holder name" required error={bankFieldErrors.bank_account_name} />
+                      <Input label="Bank Account Number" value={formData.bank_account_number} onChange={(bank_account_number) => setFormData({ ...formData, bank_account_number })} placeholder="123456789012" inputMode="numeric" required error={bankFieldErrors.bank_account_number} />
+                      <Input label="IFSC" value={formData.bank_ifsc} onChange={(bank_ifsc) => setFormData({ ...formData, bank_ifsc: bank_ifsc.toUpperCase() })} placeholder="SBIN0001234" maxLength={11} required error={bankFieldErrors.bank_ifsc} />
+                      <Input label="Bank Name" value={formData.bank_name} onChange={(bank_name) => setFormData({ ...formData, bank_name })} placeholder="State Bank of India" required error={bankFieldErrors.bank_name} />
                     </div>
                   )}
                 </div>
               </div>
               <div className="admin-modal-footer">
                 <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-                <Button type="submit" disabled={formLoading}>{formLoading ? "Saving..." : editingAgent ? "Update Agent" : "Create Agent"}</Button>
+                <Button type="submit" disabled={formLoading || !!phoneError}>{formLoading ? "Saving..." : editingAgent ? "Update Agent" : "Create Agent"}</Button>
               </div>
             </form>
           </div>
@@ -232,91 +430,76 @@ export default function AgentsPage() {
       )}
 
       <AdminTablePanel>
-        <div className="overflow-x-auto">
-          <AdminTable>
-            <AdminTableHead>
-              <tr className={darkMode ? "bg-gray-800/50" : "bg-gray-50"}>
-                <th className="px-6 py-4 text-left text-[10px] font-black uppercase tracking-widest opacity-40">Agent</th>
-                <th className="px-6 py-4 text-left text-[10px] font-black uppercase tracking-widest opacity-40">Payout</th>
-                <th className="px-6 py-4 text-left text-[10px] font-black uppercase tracking-widest opacity-40">Bank</th>
-                <th className="px-6 py-4 text-left text-[10px] font-black uppercase tracking-widest opacity-40">Status</th>
-                <th className="px-6 py-4 text-left text-[10px] font-black uppercase tracking-widest opacity-40">Created</th>
-                <th className="px-6 py-4 text-right text-[10px] font-black uppercase tracking-widest opacity-40">Actions</th>
-              </tr>
-            </AdminTableHead>
-            <AdminTableBody>
-              {filteredAgents.map((agent) => (
-                <tr key={recordId(agent)} className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                  <td className="px-6 py-4">
+        <AdminTable>
+          <AdminTableHead>
+            <tr className={darkMode ? "bg-gray-800/50" : "bg-gray-50"}>
+              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Agent</AdminTableHeaderCell>
+              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Payout</AdminTableHeaderCell>
+              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Notify</AdminTableHeaderCell>
+              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Payout</AdminTableHeaderCell>
+              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Status</AdminTableHeaderCell>
+              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Created</AdminTableHeaderCell>
+              <AdminTableHeaderCell align="right" className="text-[10px] font-black uppercase tracking-widest opacity-40">Actions</AdminTableHeaderCell>
+            </tr>
+          </AdminTableHead>
+          <AdminTableBody>
+            {loading ? (
+              <AdminTableSkeleton columns={7} leadColumn="avatar" />
+            ) : filteredAgents.length === 0 ? (
+              <AdminTableEmpty colSpan={7}>No agents found.</AdminTableEmpty>
+            ) : (
+              filteredAgents.map((agent) => (
+              <AdminTableRow key={recordId(agent)}>
+                <AdminTableCell>
                     <div className="flex items-center gap-4">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-sm font-black text-amber-600 dark:bg-amber-900/30">
                         {toDisplayInitial(getAgentDisplayName(agent))}
                       </div>
                       <div>
                         <div className="font-bold">{toDisplayTitle(getAgentDisplayName(agent))}</div>
-                        <div className="mt-0.5 flex items-center gap-1 text-xs opacity-50"><Phone className="h-3 w-3" /> {getAgentContact(agent)}</div>
+                        <div className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-amber-600">{getAgentPublicId(agent)}</div>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-black">{toDisplayTitle(agent.payout_frequency)}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <div className="flex items-center gap-2 font-bold">
-                      <Banknote className="h-4 w-4 text-emerald-600" />
-                      {agent.bank_name || "Not added"}
+                </AdminTableCell>
+                <AdminTableCell className="font-black">{toDisplayTitle(agent.payout_frequency)}</AdminTableCell>
+                <AdminTableCell className="text-xs font-bold">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4 text-blue-600" />
+                      Alerts: {normalizeAgentNotificationMethod(getAgentAlertMethod(agent)) === "EMAIL" ? "Email" : "Text message"}
                     </div>
-                    {agent.bank_account_number && <div className="mt-1 text-xs opacity-50">•••• {agent.bank_account_number.slice(-4)}</div>}
-                  </td>
-                  <td className="px-6 py-4">
+                </AdminTableCell>
+                <AdminTableCell>
+                    <div className="flex items-center gap-2 font-bold">
+                      {inferAgentPayoutMethod(agent) === "GPAY" ? (
+                        <Smartphone className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <Banknote className="h-4 w-4 text-emerald-600" />
+                      )}
+                      {getAgentPayoutLabel(agent)}
+                    </div>
+                    {inferAgentPayoutMethod(agent) === "BANK" && agent.bank_account_number && (
+                      <div className="mt-1 text-xs opacity-50">•••• {agent.bank_account_number.slice(-4)}</div>
+                    )}
+                </AdminTableCell>
+                <AdminTableCell>
                     <button onClick={() => toggleAgent(agent)} className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${agent.active !== false ? "border-emerald-200 bg-emerald-100 text-emerald-700" : "border-red-200 bg-red-100 text-red-700"}`}>
                       {agent.active !== false ? "Active" : "Inactive"}
                     </button>
-                  </td>
-                  <td className="px-6 py-4 text-xs font-bold opacity-50">{formatDisplayDateValue(agent.created_at)}</td>
-                  <td className="px-6 py-4 text-right">
+                </AdminTableCell>
+                <AdminTableCell className="text-xs font-bold opacity-50">{formatDisplayDateValue(agent.created_at)}</AdminTableCell>
+                <AdminTableCell align="right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/admin/agents/${recordId(agent)}`} className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-100 dark:hover:bg-blue-900/30"><Eye className="h-4 w-4" /></Link>
                       <button onClick={() => openEdit(agent)} className="rounded-lg p-2 text-amber-600 transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/30"><Pencil className="h-4 w-4" /></button>
                       <button onClick={() => deleteAgent(agent)} className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-100 dark:hover:bg-red-900/30"><Trash2 className="h-4 w-4" /></button>
                     </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredAgents.length === 0 && <AdminTableEmpty colSpan={6}>No agents found.</AdminTableEmpty>}
-            </AdminTableBody>
-          </AdminTable>
-        </div>
+                </AdminTableCell>
+              </AdminTableRow>
+              ))
+            )}
+          </AdminTableBody>
+        </AdminTable>
       </AdminTablePanel>
     </div>
   );
 }
-
-const Field = ({
-  label,
-  value,
-  onChange,
-  required,
-  placeholder,
-  inputMode,
-  maxLength,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  required?: boolean;
-  placeholder?: string;
-  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
-  maxLength?: number;
-}) => (
-  <label className="space-y-2">
-    <span className="text-[10px] font-black uppercase tracking-widest opacity-50">{label}</span>
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      required={required}
-      placeholder={placeholder}
-      inputMode={inputMode}
-      maxLength={maxLength}
-      className="w-full rounded-xl border px-4 py-3 font-bold outline-none focus:ring-2 focus:ring-amber-500 dark:border-gray-700 dark:bg-gray-800"
-    />
-  </label>
-);

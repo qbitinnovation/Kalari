@@ -4,6 +4,15 @@ import connectDB, { getGenericModel } from "@/lib/db";
 import { createBookingReference, createTicketCodes, parseSeatCodes } from "@/lib/booking";
 import { readStore, writeStore } from "@/lib/localStore";
 import { createNotification } from "@/lib/notificationStore";
+import { isActivityBookingDateAllowed, isActivityPubliclyBookable } from "@/lib/activityAvailability";
+import { calculateEventCommission, getCommissionPeriodKey } from "@/lib/agentCommission";
+import {
+  getBookingCustomerErrors,
+  getBookingEmailError,
+  hasBookingCustomerErrors,
+  normalizeBookingPhone,
+} from "@/lib/bookingCustomer";
+import { isValidIndianMobileDigits } from "@/lib/indianPhone";
 
 const recordId = (record: any) => String(record?.id || record?._id || "");
 const todayValue = () => new Date().toISOString().slice(0, 10);
@@ -22,12 +31,94 @@ const normalizePhone = (phone: string) => {
   const digits = String(phone || "").replace(/\D/g, "");
   if (digits.length === 10) return `+91${digits}`;
   if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
-  return String(phone || "").trim();
+  return String(phone || "").replace(/[^\d+]/g, "").trim();
+};
+
+const validateCustomerInput = (customerInput: any) => {
+  const errors = getBookingCustomerErrors({
+    name: String(customerInput?.name || ""),
+    phone: String(customerInput?.phone || ""),
+    email: String(customerInput?.email || ""),
+  });
+  if (hasBookingCustomerErrors(errors)) {
+    return errors.name || errors.phone || errors.email || "Customer name and mobile number are required.";
+  }
+  return "";
+};
+
+const validateExistingCustomer = (customer: any) => {
+  const name = String(customer?.name || "").trim();
+  const phone = normalizePhone(customer?.phone || "");
+  if (!name || name.toLowerCase() === "guest customer") {
+    return "Customer name is required.";
+  }
+  if (!phone || !isValidIndianMobileDigits(phone)) {
+    return "Valid customer mobile number is required.";
+  }
+  const emailError = getBookingEmailError(String(customer?.email || ""));
+  if (emailError) return emailError;
+  return "";
 };
 
 const getActivityPrice = (activity: any) => Number(activity?.booking_price || activity?.price || 0);
 const getActivityCapacity = (activity: any) => Number(activity?.daily_capacity || 20);
-const isActivityActive = (activity: any) => !activity?.status || String(activity.status).toUpperCase() === "ACTIVE";
+const isActivityActive = (activity: any) =>
+  String(activity?.status || "ACTIVE").toUpperCase() === "ACTIVE";
+
+const findLocalAgent = (store: any, agentId: string) =>
+  (store.agents || []).find((agent: any) => recordId(agent) === agentId);
+
+async function findAgent(agentId: string) {
+  if (!agentId) return null;
+  try {
+    await connectDB();
+    const Agent = getGenericModel("agents") as any;
+    const or: any[] = [{ id: agentId }];
+    if (isObjectId(agentId)) or.push({ _id: new mongoose.Types.ObjectId(agentId) });
+    return Agent.findOne({ $or: or }).lean();
+  } catch {
+    const store = await readStore();
+    return findLocalAgent(store, agentId);
+  }
+}
+
+const buildCommissionFields = async (activity: any, totalAmount: number, bookingTime: Date) => {
+  const agentId = String(activity?.agent_id || "");
+  const commissionPercentage = agentId ? Number(activity?.agent_commission_percentage || 0) : 0;
+  const commissionAmount = agentId
+    ? calculateEventCommission(totalAmount, commissionPercentage)
+    : 0;
+  const agent = commissionAmount > 0 ? await findAgent(agentId) : null;
+  return {
+    agent_id: agentId || null,
+    agent_commission_percentage: commissionPercentage,
+    commission_amount: commissionAmount,
+    commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
+    commission_period_key:
+      commissionAmount > 0
+        ? getCommissionPeriodKey(bookingTime, agent?.payout_frequency || "DAILY")
+        : null,
+  };
+};
+
+const buildLocalCommissionFields = (store: any, activity: any, totalAmount: number, bookingTime: Date) => {
+  const agentId = String(activity?.agent_id || "");
+  const commissionPercentage = agentId ? Number(activity?.agent_commission_percentage || 0) : 0;
+  const commissionAmount = agentId
+    ? calculateEventCommission(totalAmount, commissionPercentage)
+    : 0;
+  const agent = commissionAmount > 0 ? findLocalAgent(store, agentId) : null;
+  return {
+    agent_id: agentId || null,
+    agent_commission_percentage: commissionPercentage,
+    commission_amount: commissionAmount,
+    commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
+    commission_period_key:
+      commissionAmount > 0
+        ? getCommissionPeriodKey(bookingTime, agent?.payout_frequency || "DAILY")
+        : null,
+  };
+};
 
 const countActivityTickets = (bookings: any[]) =>
   bookings
@@ -39,16 +130,41 @@ async function ensureMongoCustomer(customerInput: any) {
   const customerId = String(customerInput?.id || customerInput?.customerId || "");
   if (customerId) {
     const byId = await Customer.findOne(isObjectId(customerId) ? { $or: [{ id: customerId }, { _id: new mongoose.Types.ObjectId(customerId) }] } : { id: customerId }).lean();
-    if (byId) return byId;
+    if (byId) {
+      const existingError = validateExistingCustomer(byId);
+      if (existingError) throw new Error(existingError);
+      const name = String(customerInput?.name || byId.name || "").trim();
+      const email = String(customerInput?.email ?? byId.email ?? "").trim();
+      if (name !== byId.name || email !== (byId.email || "")) {
+        await Customer.updateOne(
+          { _id: byId._id },
+          { $set: { name, email, updated_at: new Date().toISOString() } },
+        );
+        return { ...byId, name, email };
+      }
+      return byId;
+    }
   }
 
+  const inputError = validateCustomerInput(customerInput);
+  if (inputError) throw new Error(inputError);
+
   const phone = normalizePhone(customerInput?.phone || "");
-  if (!phone) return null;
   const existing = await Customer.findOne({ phone }).lean();
-  if (existing) return existing;
+  if (existing) {
+    const name = String(customerInput?.name || existing.name || "").trim();
+    const email = String(customerInput?.email ?? existing.email ?? "").trim();
+    await Customer.updateOne(
+      { _id: existing._id },
+      { $set: { name, email, updated_at: new Date().toISOString() } },
+    );
+    return { ...existing, name, email };
+  }
+
   return Customer.create({
-    name: customerInput?.name || "Guest Customer",
-    email: customerInput?.email || "",
+    id: `customers-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: String(customerInput?.name || "").trim(),
+    email: String(customerInput?.email || "").trim(),
     phone,
     phone_verified: false,
     created_at: new Date().toISOString(),
@@ -60,18 +176,35 @@ function ensureLocalCustomer(store: any, customerInput: any) {
   const customerId = String(customerInput?.id || customerInput?.customerId || "");
   if (customerId) {
     const byId = (store.customers || []).find((customer: any) => recordId(customer) === customerId);
-    if (byId) return byId;
+    if (byId) {
+      const existingError = validateExistingCustomer(byId);
+      if (existingError) throw new Error(existingError);
+      const name = String(customerInput?.name || byId.name || "").trim();
+      const email = String(customerInput?.email ?? byId.email ?? "").trim();
+      byId.name = name;
+      byId.email = email;
+      byId.updated_at = new Date().toISOString();
+      return byId;
+    }
   }
 
+  const inputError = validateCustomerInput(customerInput);
+  if (inputError) throw new Error(inputError);
+
   const phone = normalizePhone(customerInput?.phone || "");
-  if (!phone) return null;
   store.customers = store.customers || [];
   const existing = store.customers.find((customer: any) => customer.phone === phone);
-  if (existing) return existing;
+  if (existing) {
+    existing.name = String(customerInput?.name || existing.name || "").trim();
+    existing.email = String(customerInput?.email ?? existing.email ?? "").trim();
+    existing.updated_at = new Date().toISOString();
+    return existing;
+  }
+
   const customer = {
     id: `customers-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: customerInput?.name || "Guest Customer",
-    email: customerInput?.email || "",
+    name: String(customerInput?.name || "").trim(),
+    email: String(customerInput?.email || "").trim(),
     phone,
     phone_verified: false,
     created_at: new Date().toISOString(),
@@ -133,8 +266,15 @@ export async function POST(req: NextRequest) {
     const Ticket = getGenericModel("tickets") as any;
     const activity = await findActivity(Activity, activityId);
     if (!activity) throw new Error("Activity not found in primary store.");
-    if (!isActivityActive(activity)) return NextResponse.json({ error: "Activity is not available." }, { status: 404 });
-    if (activity.booking_status === "PAUSED") return NextResponse.json({ error: "Activity booking is paused." }, { status: 409 });
+    if (!isActivityPubliclyBookable(activity)) {
+      return NextResponse.json({ error: "Activity is not available for booking." }, { status: 404 });
+    }
+    if (activity.booking_status === "PAUSED") {
+      return NextResponse.json({ error: "Activity booking is paused." }, { status: 409 });
+    }
+    if (!isActivityBookingDateAllowed(activity, date)) {
+      return NextResponse.json({ error: "Selected date is outside this activity's booking window." }, { status: 409 });
+    }
 
     const activityRecordId = recordId(activity);
     const bookings = await Booking.find({ activity_id: activityRecordId, booking_date: date, booking_type: "ACTIVITY", status: "CONFIRMED" }).lean();
@@ -150,6 +290,7 @@ export async function POST(req: NextRequest) {
     const bookedBy = customer?.name || body.customer?.name || "Walk-in customer";
     const seatCodes = Array.from({ length: ticketCount }, () => "GENERAL");
     const totalAmount = getActivityPrice(activity) * ticketCount;
+    const commissionFields = await buildCommissionFields(activity, totalAmount, now);
 
     const [booking] = await Booking.insertMany([{
       booking_reference: bookingReference,
@@ -165,6 +306,7 @@ export async function POST(req: NextRequest) {
       payment_status: paymentMethod === "COD" ? "COD_PENDING" : "PAID",
       total_amount: totalAmount,
       cancellation_status: "NONE",
+      ...commissionFields,
     }]);
     const ticketCodes = createTicketCodes(ticketCount, now);
     const tickets = await Ticket.insertMany(seatCodes.map((seatCode, index) => ({
@@ -194,7 +336,13 @@ export async function POST(req: NextRequest) {
     const store = await readStore();
     const activity = findLocalActivity(store, activityId);
     if (!activity || !isActivityActive(activity)) return NextResponse.json({ error: "Activity is not available." }, { status: 404 });
+    if (!isActivityPubliclyBookable(activity)) {
+      return NextResponse.json({ error: "Activity is not available for booking." }, { status: 404 });
+    }
     if (activity.booking_status === "PAUSED") return NextResponse.json({ error: "Activity booking is paused." }, { status: 409 });
+    if (!isActivityBookingDateAllowed(activity, date)) {
+      return NextResponse.json({ error: "Selected date is outside this activity's booking window." }, { status: 409 });
+    }
 
     const bookings = (store.bookings || []).filter((booking: any) =>
       booking.activity_id === recordId(activity) &&
@@ -213,6 +361,8 @@ export async function POST(req: NextRequest) {
     const bookingReference = createBookingReference(now);
     const bookedBy = customer?.name || body.customer?.name || "Walk-in customer";
     const seatCodes = Array.from({ length: ticketCount }, () => "GENERAL");
+    const totalAmount = getActivityPrice(activity) * ticketCount;
+    const commissionFields = buildLocalCommissionFields(store, activity, totalAmount, now);
     const booking = {
       id: `bookings-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       booking_reference: bookingReference,
@@ -226,8 +376,9 @@ export async function POST(req: NextRequest) {
       status: "CONFIRMED",
       payment_method: paymentMethod,
       payment_status: paymentMethod === "COD" ? "COD_PENDING" : "PAID",
-      total_amount: getActivityPrice(activity) * ticketCount,
+      total_amount: totalAmount,
       cancellation_status: "NONE",
+      ...commissionFields,
     };
     const ticketCodes = createTicketCodes(ticketCount, now);
     const tickets = seatCodes.map((seatCode, index) => ({

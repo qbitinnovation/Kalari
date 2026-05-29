@@ -16,7 +16,7 @@ import { useDarkMode } from '@/hooks/useDarkMode'
 import { useAuth } from '@/contexts/AuthContext'
 import { getBookingReference, isGeneralAdmissionSeatCode } from '@/lib/booking'
 import { toDisplayTitle } from '@/lib/textFormat'
-import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, Button, DatePicker, SearchInput, Select } from '@/components/ui'
+import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, AdminTableSkeleton, Button, DatePicker, SearchInput, Select } from '@/components/ui'
 import { formatDisplayDateValue, formatDisplayTimeValue } from '@/components/ui/date-utils'
 
 interface TicketWithDetails extends Omit<Ticket, 'show' | 'activity' | 'booking'> {
@@ -24,7 +24,7 @@ interface TicketWithDetails extends Omit<Ticket, 'show' | 'activity' | 'booking'
     title: string
     date: string
     time: string
-    type?: 'KALARI' | 'EVENT'
+    type?: 'KALARI'
   }
   activity?: {
     title: string
@@ -64,7 +64,7 @@ interface BookingGroup {
     title: string
     date: string
     time: string
-    type?: 'KALARI' | 'EVENT'
+    type?: 'KALARI'
   }
   activity?: {
     title: string
@@ -217,7 +217,7 @@ const Tickets: React.FC = () => {
   })
 
   const isEventBooking = (booking: BookingGroup) =>
-    booking.booking_type === 'ACTIVITY' || booking.show?.type === 'EVENT' || booking.seat_codes.every(isGeneralAdmissionSeatCode)
+    booking.booking_type === 'ACTIVITY' || booking.seat_codes.every(isGeneralAdmissionSeatCode)
 
   const getTicketDisplayLabel = (booking: BookingGroup) => isEventBooking(booking) ? 'Admission' : 'Seats'
 
@@ -476,14 +476,6 @@ const Tickets: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
-
   return (
     <div>
       <div className="mb-8 flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
@@ -627,14 +619,16 @@ const Tickets: React.FC = () => {
                 </tr>
               </AdminTableHead>
               <AdminTableBody>
-                {filteredBookings.length === 0 && (
+                {loading ? (
+                  <AdminTableSkeleton columns={7} leadColumn="avatar" />
+                ) : filteredBookings.length === 0 ? (
                   <AdminTableEmpty colSpan={7}>
                     {searchTerm || statusFilter !== 'all' || selectedDate
                       ? 'No ticket history matches the current filters.'
                       : 'No ticket history to display.'}
                   </AdminTableEmpty>
-                )}
-                {filteredBookings.map((booking) => (
+                ) : (
+                  filteredBookings.map((booking) => (
                   <tr key={booking.booking_id} className={`transition-colors duration-200 ${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'}`}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className={`truncate text-sm font-mono transition-colors duration-200 ${darkMode ? 'text-slate-100' : 'text-slate-900'}`} title={booking.booking_reference}>
@@ -728,7 +722,8 @@ const Tickets: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </AdminTableBody>
             </AdminTable>
       </AdminTablePanel>

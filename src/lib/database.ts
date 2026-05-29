@@ -153,11 +153,9 @@ export interface Show {
   price: number;
   image?: string;
   description?: string;
-  type?: 'KALARI' | 'EVENT';
+  type?: 'KALARI';
   capacity?: number;
   layout_id?: string;
-  agent_id?: string;
-  agent_commission_percentage?: number;
   active: boolean;
   status?: "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE";
   booked_count?: number;
@@ -170,18 +168,23 @@ export interface Show {
 export interface Agent {
   id: string;
   _id?: string;
+  agent_code?: string;
   name: string;
   phone: string;
+  email?: string;
+  commission_notification_method?: "SMS" | "EMAIL";
+  remaining_amount_notification_method?: "SMS" | "EMAIL";
   bank_account_name?: string;
   bank_account_number?: string;
   bank_ifsc?: string;
   bank_name?: string;
+  payout_method?: "BANK" | "GPAY";
+  gpay_phone?: string;
   payout_frequency: "DAILY" | "WEEKLY" | "MONTHLY";
   active: boolean;
   created_at: string;
   updated_at?: string;
   full_name?: string;
-  email?: string;
   commission_percentage?: number;
 }
 
@@ -215,16 +218,20 @@ export interface Activity {
   title: string;
   category: string;
   location: string;
-  duration: string;
+  duration?: string;
+  start_date?: string;
+  end_date?: string;
   price: number;
   booking_price?: number;
   daily_capacity?: number;
   booking_status?: "ACTIVE" | "PAUSED";
+  agent_id?: string;
+  agent_commission_percentage?: number;
   rating?: number;
   review_count?: number;
   image?: string;
   description?: string;
-  status?: "ACTIVE" | "DRAFT";
+  status?: "ACTIVE" | "DRAFT" | "COMPLETED";
   featured?: boolean;
   tags?: string[];
   created_at?: string;
@@ -299,6 +306,7 @@ export interface Notification {
   message: string;
   target_roles: ("admin" | "staff" | "agent")[];
   read_by?: string[];
+  toast_shown_by?: string[];
   entity_type?: string;
   entity_id?: string;
   action_url?: string;

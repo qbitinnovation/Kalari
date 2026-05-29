@@ -1,21 +1,37 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import {
-  ChevronDown,
-  Clock,
-  MapPin,
-  Pencil,
-  Plus,
-  Star,
-  Ticket,
-  Trash2,
-  X,
-} from "lucide-react";
-import { db } from "@/lib/database";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
+import { db, type Agent } from "@/lib/database";
 import { activityImages } from "@/lib/seedData";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { Button, Input, Select, Textarea } from "@/components/ui";
+import { getAgentContact, getAgentDisplayName } from "@/lib/agentCommission";
+import { canBookActivity, getAdminBookingUrl } from "@/lib/adminBooking";
+import {
+  activityDisplayStatusLabels,
+  activityDisplayStatusStyles,
+  formatAdminActivityDates,
+  getActivityDisplayStatus,
+} from "@/lib/activityAvailability";
+import {
+  AdminTable,
+  AdminTableBody,
+  AdminTableCell,
+  AdminTableEmpty,
+  AdminTableHead,
+  AdminTableHeaderCell,
+  AdminTablePanel,
+  AdminTableRow,
+  AdminTableSkeleton,
+  Button,
+  DatePicker,
+  Input,
+  Select,
+  Textarea,
+} from "@/components/ui";
+import { formatDisplayDateValue, todayDateValue } from "@/components/ui/date-utils";
 import { toDisplayTitle } from "@/lib/textFormat";
 
 type Activity = {
@@ -25,35 +41,45 @@ type Activity = {
   title: string;
   category: string;
   location: string;
-  duration: string;
+  duration?: string;
+  start_date?: string;
+  end_date?: string;
   price: number;
   booking_price?: number;
   daily_capacity?: number;
   booking_status?: "ACTIVE" | "PAUSED";
+  agent_id?: string;
+  agent_commission_percentage?: number;
   rating: number;
   review_count: number;
   image: string;
   description: string;
-  status: "ACTIVE" | "DRAFT";
+  status: "ACTIVE" | "DRAFT" | "COMPLETED";
   featured: boolean;
   tags?: string[];
 };
 
+const defaultEndDate = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 90);
+  return date.toISOString().slice(0, 10);
+};
+
 const blankForm = {
   title: "",
-  slug: "",
-  category: "Activities",
   location: "Kovalam",
-  duration: "2 hours",
+  start_date: todayDateValue(),
+  end_date: defaultEndDate(),
   price: "999",
-  booking_price: "999",
   daily_capacity: "20",
   booking_status: "ACTIVE" as "ACTIVE" | "PAUSED",
+  agent_id: "",
+  agent_commission_percentage: "",
   rating: "4.7",
   review_count: "0",
   image: activityImages.kalari,
   description: "",
-  status: "ACTIVE" as "ACTIVE" | "DRAFT",
+  status: "ACTIVE" as "ACTIVE" | "DRAFT" | "COMPLETED",
   featured: false,
   tags: "Instant confirmation, Family friendly",
 };
@@ -65,18 +91,46 @@ const slugify = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
+const formatAdminActivityDatesDisplay = (activity: Activity) => {
+  const label = formatAdminActivityDates(activity);
+  if (!label) return null;
+  if (label.includes(" to ")) {
+    const [start, end] = label.split(" to ");
+    return `${formatDisplayDateValue(start)} to ${formatDisplayDateValue(end)}`;
+  }
+  if (label.startsWith("From ")) {
+    return `From ${formatDisplayDateValue(label.slice(5))}`;
+  }
+  if (label.startsWith("Until ")) {
+    return `Until ${formatDisplayDateValue(label.slice(6))}`;
+  }
+  return label;
+};
+
 export default function AdminActivitiesPage() {
   const darkMode = useDarkMode();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [bookingSettingsOpen, setBookingSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<Activity | null>(null);
   const [form, setForm] = useState(blankForm);
+  const [commissionError, setCommissionError] = useState("");
+  const [dateError, setDateError] = useState("");
 
   useEffect(() => {
     fetchActivities();
+    fetchAgents();
   }, []);
+
+  useEffect(() => {
+    if (!editId || loading || activities.length === 0) return;
+    const activity = activities.find((item) => recordId(item) === editId);
+    if (activity) openEdit(activity);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId, loading, activities]);
 
   const fetchActivities = async () => {
     setLoading(true);
@@ -88,25 +142,60 @@ export default function AdminActivitiesPage() {
     setLoading(false);
   };
 
+  const fetchAgents = async () => {
+    try {
+      const { data, error } = await db
+        .from("agents")
+        .select("*")
+        .eq("active", true)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      const legacy = await db
+        .from("users")
+        .select("*")
+        .eq("role", "agent")
+        .eq("active", true)
+        .order("full_name", { ascending: true });
+      const legacyAgents = (legacy.data || []).map((agent: any) => ({
+        ...agent,
+        name: agent.full_name,
+        phone: agent.phone || agent.email,
+        payout_frequency: "MONTHLY",
+      }));
+      const existingIds = new Set(
+        (data || []).map((agent: any) => String(agent.id || agent._id)),
+      );
+      setAgents([
+        ...(data || []),
+        ...legacyAgents.filter(
+          (agent: any) => !existingIds.has(String(agent.id || agent._id)),
+        ),
+      ]);
+    } catch (error) {
+      console.error("Error fetching agents:", error);
+    }
+  };
+
   const openCreate = () => {
     setEditing(null);
     setForm(blankForm);
-    setBookingSettingsOpen(false);
+    setCommissionError("");
     setModalOpen(true);
   };
 
   const openEdit = (activity: Activity) => {
     setEditing(activity);
+    setCommissionError("");
     setForm({
       title: activity.title || "",
-      slug: activity.slug || "",
-      category: activity.category || "Activities",
       location: activity.location || "",
-      duration: activity.duration || "",
-      price: String(activity.price || 0),
-      booking_price: String(activity.booking_price || activity.price || 0),
+      start_date: activity.start_date || todayDateValue(),
+      end_date: activity.end_date || defaultEndDate(),
+      price: String(activity.booking_price || activity.price || 0),
       daily_capacity: String(activity.daily_capacity || 20),
       booking_status: activity.booking_status || "ACTIVE",
+      agent_id: activity.agent_id || "",
+      agent_commission_percentage: String(activity.agent_commission_percentage || 0),
       rating: String(activity.rating || 4.7),
       review_count: String(activity.review_count || 0),
       image: activity.image || activityImages.kalari,
@@ -115,23 +204,53 @@ export default function AdminActivitiesPage() {
       featured: Boolean(activity.featured),
       tags: (activity.tags || []).join(", "),
     });
-    setBookingSettingsOpen(true);
     setModalOpen(true);
   };
 
   const saveActivity = async (event: React.FormEvent) => {
     event.preventDefault();
+
+    if (!form.start_date?.trim() || !form.end_date?.trim()) {
+      setDateError("Start date and end date are required.");
+      return;
+    }
+    if (form.end_date < form.start_date) {
+      setDateError("End date must be on or after the start date.");
+      return;
+    }
+    setDateError("");
+
+    if (form.agent_id) {
+      const raw = String(form.agent_commission_percentage ?? "").trim();
+      const pct = Number(raw);
+      if (!raw) {
+        setCommissionError("Commission percentage is required when a linked agent is selected.");
+        return;
+      }
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        setCommissionError("Enter a valid commission percentage between 0 and 100.");
+        return;
+      }
+    }
+    setCommissionError("");
+
     const now = new Date().toISOString();
+    const price = Number(form.price);
     const payload = {
       title: form.title,
-      slug: form.slug || slugify(form.title),
-      category: form.category,
+      slug: editing?.slug || slugify(form.title),
+      category: editing?.category || "Activities",
       location: form.location,
-      duration: form.duration,
-      price: Number(form.price),
-      booking_price: Number(form.booking_price || form.price),
+      start_date: form.start_date,
+      end_date: form.end_date,
+      price,
+      booking_price: price,
       daily_capacity: Number(form.daily_capacity || 0),
       booking_status: form.booking_status,
+      agent_id: form.agent_id || null,
+      agent_commission_percentage: form.agent_id
+        ? Number(form.agent_commission_percentage || 0)
+        : 0,
       rating: Number(form.rating),
       review_count: Number(form.review_count),
       image: form.image,
@@ -150,9 +269,7 @@ export default function AdminActivitiesPage() {
     } else {
       await db
         .from("activities")
-        .insert([
-          { ...payload, id: `activity-${Date.now()}`, created_at: now },
-        ]);
+        .insert([{ ...payload, id: `activity-${Date.now()}`, created_at: now }]);
     }
 
     setModalOpen(false);
@@ -177,8 +294,7 @@ export default function AdminActivitiesPage() {
           <p
             className={`mt-1 text-sm ${darkMode ? "text-slate-400" : "text-slate-600"}`}
           >
-            Manage public activity cards, Kalari booking products, prices, and
-            images.
+            Manage bookable experiences, availability dates, agents, and commission.
           </p>
         </div>
         <Button onClick={openCreate}>
@@ -187,84 +303,108 @@ export default function AdminActivitiesPage() {
         </Button>
       </div>
 
-      {loading ? (
-        <div className="flex h-56 items-center justify-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-amber-600" />
-        </div>
-      ) : (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {activities.map((activity) => (
-            <article
-              key={recordId(activity)}
-              className={`overflow-hidden rounded-2xl border shadow-sm ${darkMode ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"}`}
-            >
-              <img
-                src={activity.image}
-                alt={toDisplayTitle(activity.title)}
-                className="h-48 w-full object-cover"
-              />
-              <div className="p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase tracking-widest text-blue-700">
-                    {toDisplayTitle(activity.category)}
-                  </span>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-black ${activity.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-                  >
-                    {toDisplayTitle(activity.status)}
-                  </span>
-                </div>
-                <h2 className="mt-3 text-xl font-black">
-                  {toDisplayTitle(activity.title)}
-                </h2>
-                <p className="mt-2 line-clamp-2 text-sm opacity-70">
-                  {toDisplayTitle(activity.description)}
-                </p>
-                <div className="mt-4 grid gap-2 text-sm font-semibold opacity-80">
-                  <span className="inline-flex items-center gap-2">
-                    <MapPin className="h-4 w-4" /> {activity.location}
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <Clock className="h-4 w-4" /> {activity.duration}
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <Star className="h-4 w-4" /> {activity.rating} (
-                    {activity.review_count})
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <Ticket className="h-4 w-4" />{" "}
-                    {activity.booking_status === "PAUSED"
-                      ? "Booking Paused"
-                      : "Booking Active"}{" "}
-                    · {activity.daily_capacity || 20}/day
-                  </span>
-                </div>
-                <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-800">
-                  <span className="text-2xl font-black">
-                    Rs. {activity.price}
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => openEdit(activity)}
-                      className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
-                      aria-label="Edit activity"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => deleteActivity(activity)}
-                      className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                      aria-label="Delete activity"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+      <AdminTablePanel>
+        <AdminTable>
+          <AdminTableHead>
+            <tr>
+              <AdminTableHeaderCell>Activity</AdminTableHeaderCell>
+              <AdminTableHeaderCell>Location</AdminTableHeaderCell>
+              <AdminTableHeaderCell>Dates</AdminTableHeaderCell>
+              <AdminTableHeaderCell align="right">Price</AdminTableHeaderCell>
+              <AdminTableHeaderCell>Booking</AdminTableHeaderCell>
+              <AdminTableHeaderCell>Status</AdminTableHeaderCell>
+              <AdminTableHeaderCell align="right">Actions</AdminTableHeaderCell>
+            </tr>
+          </AdminTableHead>
+          <AdminTableBody>
+            {loading ? (
+              <AdminTableSkeleton columns={7} leadColumn="avatar" />
+            ) : activities.length === 0 ? (
+              <AdminTableEmpty colSpan={7}>No activities found.</AdminTableEmpty>
+            ) : (
+              activities.map((activity) => {
+                const displayStatus = getActivityDisplayStatus(activity);
+                const id = recordId(activity);
+                const bookable = canBookActivity(activity);
+                const dateLabel = formatAdminActivityDatesDisplay(activity);
+                return (
+                  <AdminTableRow key={id}>
+                    <AdminTableCell>
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={activity.image || activityImages.kalari}
+                          alt={toDisplayTitle(activity.title)}
+                          className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-bold">{toDisplayTitle(activity.title)}</div>
+                          <div className="mt-0.5 truncate text-xs opacity-50">{toDisplayTitle(activity.category)}</div>
+                        </div>
+                      </div>
+                    </AdminTableCell>
+                    <AdminTableCell>{activity.location}</AdminTableCell>
+                    <AdminTableCell>
+                      {dateLabel ? (
+                        dateLabel
+                      ) : (
+                        <span className="text-xs font-bold text-amber-700">Dates not set</span>
+                      )}
+                    </AdminTableCell>
+                    <AdminTableCell align="right">
+                      <span className="font-black">Rs. {activity.booking_price || activity.price}</span>
+                    </AdminTableCell>
+                    <AdminTableCell>
+                      <div className="space-y-1">
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                            activity.booking_status === "PAUSED"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-emerald-100 text-emerald-700"
+                          }`}
+                        >
+                          {activity.booking_status === "PAUSED" ? "Paused" : "Open"}
+                        </span>
+                        <div className="text-xs opacity-60">{activity.daily_capacity || 20}/day</div>
+                      </div>
+                    </AdminTableCell>
+                    <AdminTableCell>
+                      <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${activityDisplayStatusStyles[displayStatus]}`}
+                      >
+                        {activityDisplayStatusLabels[displayStatus]}
+                      </span>
+                    </AdminTableCell>
+                    <AdminTableCell align="right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Link href={`/admin/activities/${id}`}>
+                          <Button size="sm" variant="ghost" aria-label="View activity">
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </Link>
+                        <Button size="sm" variant="ghost" onClick={() => openEdit(activity)} aria-label="Edit activity">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => deleteActivity(activity)} aria-label="Delete activity">
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                        {bookable ? (
+                          <Link href={getAdminBookingUrl({ activityId: id, date: todayDateValue() })}>
+                            <Button size="sm">Book Now</Button>
+                          </Link>
+                        ) : (
+                          <Button size="sm" disabled>
+                            Book Now
+                          </Button>
+                        )}
+                      </div>
+                    </AdminTableCell>
+                  </AdminTableRow>
+                );
+              })
+            )}
+          </AdminTableBody>
+        </AdminTable>
+      </AdminTablePanel>
 
       {modalOpen && (
         <div className="admin-modal-overlay">
@@ -278,7 +418,8 @@ export default function AdminActivitiesPage() {
                   {editing ? "Edit Activity" : "Add Activity"}
                 </h2>
                 <p className="admin-modal-subtitle">
-                  Manage public activity cards, pricing, and visibility.
+                  Published activities appear on the website when status is ACTIVE
+                  and within the start/end dates.
                 </p>
               </div>
               <button
@@ -294,22 +435,9 @@ export default function AdminActivitiesPage() {
               <Input
                 label="Title"
                 value={form.title}
-                onChange={(title) =>
-                  setForm({ ...form, title, slug: form.slug || slugify(title) })
-                }
+                onChange={(title) => setForm({ ...form, title })}
                 required
-              />
-              <Input
-                label="Slug"
-                value={form.slug}
-                onChange={(slug) => setForm({ ...form, slug })}
-                required
-              />
-              <Input
-                label="Category"
-                value={form.category}
-                onChange={(category) => setForm({ ...form, category })}
-                required
+                className="sm:col-span-2"
               />
               <Input
                 label="Location"
@@ -317,18 +445,98 @@ export default function AdminActivitiesPage() {
                 onChange={(location) => setForm({ ...form, location })}
                 required
               />
-              <Input
-                label="Duration"
-                value={form.duration}
-                onChange={(duration) => setForm({ ...form, duration })}
+              <DatePicker
+                label="Start Date"
+                value={form.start_date}
+                onChange={(start_date) => {
+                  setDateError("");
+                  setForm({ ...form, start_date });
+                }}
                 required
               />
+              <DatePicker
+                label="End Date"
+                value={form.end_date}
+                onChange={(end_date) => {
+                  setDateError("");
+                  setForm({ ...form, end_date });
+                }}
+                required
+              />
+              {dateError ? (
+                <p className="text-sm font-bold text-red-600">{dateError}</p>
+              ) : null}
+              <Select
+                label="Linked Agent"
+                value={form.agent_id || "__none__"}
+                onChange={(agent_id) => {
+                  const linked = agent_id !== "__none__";
+                  setCommissionError("");
+                  setForm({
+                    ...form,
+                    agent_id: linked ? agent_id : "",
+                    agent_commission_percentage: linked ? form.agent_commission_percentage : "",
+                  });
+                }}
+                placeholder="No linked agent"
+                options={[
+                  { value: "__none__", label: "No linked agent" },
+                  ...agents.map((agent) => ({
+                    value: String(agent.id || agent._id),
+                    label: `${getAgentDisplayName(agent)}${getAgentContact(agent) ? ` (${getAgentContact(agent)})` : ""}`,
+                  })),
+                ]}
+                searchable={agents.length > 3}
+                className="sm:col-span-2"
+              />
+              {form.agent_id ? (
+                <Input
+                  label="Agent Commission (%)"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  required
+                  value={form.agent_commission_percentage}
+                  error={commissionError}
+                  onChange={(agent_commission_percentage) => {
+                    setCommissionError("");
+                    setForm({ ...form, agent_commission_percentage });
+                  }}
+                  placeholder="e.g. 10"
+                  className="sm:col-span-2"
+                />
+              ) : null}
               <Input
                 label="Price"
                 type="number"
                 value={form.price}
                 onChange={(price) => setForm({ ...form, price })}
                 required
+              />
+              <Input
+                label="Daily Ticket Limit"
+                type="number"
+                min={1}
+                value={form.daily_capacity}
+                onChange={(daily_capacity) =>
+                  setForm({ ...form, daily_capacity })
+                }
+                required
+              />
+              <Select
+                label="Booking Status"
+                value={form.booking_status}
+                onChange={(booking_status) =>
+                  setForm({
+                    ...form,
+                    booking_status: booking_status as "ACTIVE" | "PAUSED",
+                  })
+                }
+                options={[
+                  { value: "ACTIVE", label: "Active" },
+                  { value: "PAUSED", label: "Paused" },
+                ]}
               />
               <Input
                 label="Rating"
@@ -368,14 +576,14 @@ export default function AdminActivitiesPage() {
                 label="Status"
                 value={form.status}
                 onChange={(status) =>
-                  setForm({ ...form, status: status as "ACTIVE" | "DRAFT" })
+                  setForm({ ...form, status: status as "ACTIVE" | "DRAFT" | "COMPLETED" })
                 }
                 options={[
                   { value: "ACTIVE", label: "ACTIVE" },
                   { value: "DRAFT", label: "DRAFT" },
                 ]}
               />
-              <label className="flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-slate-950 dark:bg-slate-900 dark:text-slate-100">
+              <label className="flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-slate-950 dark:bg-slate-900 dark:text-slate-100 sm:col-span-2">
                 <input
                   type="checkbox"
                   checked={form.featured}
@@ -385,63 +593,6 @@ export default function AdminActivitiesPage() {
                 />
                 <span className="font-bold">Featured on homepage</span>
               </label>
-              <div className="sm:col-span-2 rounded-xl border border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setBookingSettingsOpen((open) => !open)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                >
-                  <div>
-                    <div className="text-sm font-black uppercase tracking-widest text-slate-500">
-                      Booking Settings
-                    </div>
-                    <div className="text-xs font-semibold text-slate-400">
-                      Daily capacity, booking price, and booking status.
-                    </div>
-                  </div>
-                  <ChevronDown
-                    className={`h-5 w-5 transition ${bookingSettingsOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-                {bookingSettingsOpen && (
-                  <div className="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-3 dark:border-slate-800">
-                    <Input
-                      label="Daily Ticket Limit"
-                      type="number"
-                      min={1}
-                      value={form.daily_capacity}
-                      onChange={(daily_capacity) =>
-                        setForm({ ...form, daily_capacity })
-                      }
-                      required
-                    />
-                    <Input
-                      label="Booking Price"
-                      type="number"
-                      min={0}
-                      value={form.booking_price}
-                      onChange={(booking_price) =>
-                        setForm({ ...form, booking_price })
-                      }
-                      required
-                    />
-                    <Select
-                      label="Booking Status"
-                      value={form.booking_status}
-                      onChange={(booking_status) =>
-                        setForm({
-                          ...form,
-                          booking_status: booking_status as "ACTIVE" | "PAUSED",
-                        })
-                      }
-                      options={[
-                        { value: "ACTIVE", label: "Active" },
-                        { value: "PAUSED", label: "Paused" },
-                      ]}
-                    />
-                  </div>
-                )}
-              </div>
             </div>
             <div className="admin-modal-footer">
               <Button

@@ -23,7 +23,7 @@ type BookingRow = Booking & {
     date: string;
     time: string;
     price: number;
-    type?: "KALARI" | "EVENT";
+    type?: "KALARI";
     description?: string;
   };
   activity?: {
@@ -89,7 +89,8 @@ export default function CustomerBookingDetailPage() {
   const seats = useMemo(() => parseSeatCodes(booking?.seat_code), [booking]);
   const bookingReference = booking ? getBookingReference(booking) : "";
   const isActivityBooking = booking?.booking_type === "ACTIVITY" || Boolean(booking?.activity_id);
-  const isEventBooking = isActivityBooking || booking?.show?.type === "EVENT" || seats.every(isGeneralAdmissionSeatCode);
+  const isEventBooking =
+    isActivityBooking || seats.every(isGeneralAdmissionSeatCode);
   const ticketDisplayValue = isEventBooking ? `GENERAL${tickets.length > 1 ? ` x ${tickets.length}` : ""}` : seats.join(", ");
   const qrValue = bookingReference;
   const displayTitle = booking?.show?.title || booking?.activity?.title || "Booking";
