@@ -45,6 +45,7 @@ import {
   hasBookingCustomerErrors,
   normalizeBookingPhone,
 } from '@/lib/bookingCustomer'
+import { buildShowAgentCommissionFields } from '@/lib/agentCommission'
 import { toDisplayTitle } from '@/lib/textFormat'
 
 interface SeatData {
@@ -77,6 +78,7 @@ const Booking: React.FC = () => {
   const [shows, setShows] = useState<Show[]>([])
   const [allShows, setAllShows] = useState<Show[]>([])
   const [selectedShow, setSelectedShow] = useState<Show | null>(null)
+  const [linkedShowAgent, setLinkedShowAgent] = useState<any>(null)
   const [activities, setActivities] = useState<Activity[]>([])
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null)
   const [activityTicketCount, setActivityTicketCount] = useState(1)
@@ -121,7 +123,19 @@ const Booking: React.FC = () => {
   }, [selectedShow])
 
   useEffect(() => {
-    if (bookingMode !== 'SHOW') return
+    const loadLinkedAgent = async () => {
+      const agentId = String((selectedShow as any)?.agent_id || "")
+      if (!agentId) {
+        setLinkedShowAgent(null)
+        return
+      }
+      const { data } = await db.from('agents').select('*').eq('id', agentId).single()
+      setLinkedShowAgent(data || null)
+    }
+    void loadLinkedAgent()
+  }, [selectedShow])
+
+  useEffect(() => {
     if (selectedDate) {
       const filteredShows = allShows.filter(show => show.date === selectedDate)
       setShows(filteredShows)
@@ -440,14 +454,11 @@ const Booking: React.FC = () => {
       const bookingToInsert = {
         booking_reference: bookingReference,
         show_id: recordId(selectedShow),
+        booking_type: 'SHOW',
         seat_code: JSON.stringify(seatCodesToSave),
         booked_by: customer.name,
         customer_id: recordId(customer),
-        agent_id: null,
-        agent_commission_percentage: 0,
-        commission_amount: 0,
-        commission_status: 'PAID',
-        commission_period_key: null,
+        ...buildShowAgentCommissionFields(selectedShow, getTotalAmount(), new Date(), linkedShowAgent),
         payment_method: 'COUNTER',
         payment_status: 'PAID',
         total_amount: getTotalAmount(),

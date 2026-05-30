@@ -39,6 +39,7 @@ import {
   isShowBookableAt,
   parseSeatCodes,
 } from "@/lib/booking";
+import { buildShowAgentCommissionFields } from "@/lib/agentCommission";
 import { isActivityPubliclyBookable, isActivityPubliclyVisible } from "@/lib/activityAvailability";
 import { Input, IndianPhoneField } from "@/components/ui";
 import { getIndianMobileDigits } from "@/lib/indianPhone";
@@ -175,7 +176,21 @@ const BookingContent: React.FC = () => {
   const [ticketCodes, setTicketCodes] = useState<string[]>([]);
   const [showsLoading, setShowsLoading] = useState(true);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
+  const [linkedShowAgent, setLinkedShowAgent] = useState<any>(null);
   const selectedShowIdRef = useRef("");
+
+  useEffect(() => {
+    const loadLinkedAgent = async () => {
+      const agentId = String((selectedShow as any)?.agent_id || "");
+      if (!agentId) {
+        setLinkedShowAgent(null);
+        return;
+      }
+      const { data } = await db.from("agents").select("*").eq("id", agentId).single();
+      setLinkedShowAgent(data || null);
+    };
+    void loadLinkedAgent();
+  }, [selectedShow]);
 
   useEffect(() => {
     fetchShows();
@@ -725,12 +740,20 @@ const BookingContent: React.FC = () => {
       new Date(now),
     );
 
+    const commissionFields = buildShowAgentCommissionFields(
+      selectedShow,
+      totalAmount,
+      new Date(now),
+      linkedShowAgent,
+    );
+
     const { data: bookings, error: bookingError } = await db
       .from("bookings")
       .insert([
         {
           booking_reference: bookingReference,
           show_id: getRecordId(selectedShow),
+          booking_type: "SHOW",
           seat_code: JSON.stringify(seatCodesToSave),
           booked_by: customerSession?.name || form.name.trim(),
           customer_id: customerId,
@@ -742,11 +765,7 @@ const BookingContent: React.FC = () => {
           payment_method: method === "cod" ? "COD" : "RAZORPAY",
           payment_status: status,
           total_amount: totalAmount,
-          agent_id: null,
-          agent_commission_percentage: 0,
-          commission_amount: 0,
-          commission_status: "PAID",
-          commission_period_key: null,
+          ...commissionFields,
           cancellation_status: "NONE",
         },
       ]);

@@ -5,6 +5,12 @@ import { db, Customer } from '@/lib/database'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { useAuth } from '@/contexts/AuthContext'
+import {
+  logCustomerCreation,
+  logCustomerDeletion,
+  logCustomerUpdate,
+} from '@/utils/activityLogger'
 import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, AdminTableSkeleton, Button, Input, IndianPhoneField, SearchInput, Textarea } from '@/components/ui'
 import { getRecordId } from '@/lib/booking'
 import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
@@ -26,6 +32,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 const Customers: React.FC = () => {
+  const { user } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -89,7 +96,10 @@ const Customers: React.FC = () => {
     try {
       setSubmitting(true)
       
+      const performedBy = user?.email || user?.full_name || 'admin'
+
       if (editingCustomer) {
+        const customerId = getRecordId(editingCustomer)
         const { error } = await db
           .from('customers')
           .update({
@@ -97,11 +107,12 @@ const Customers: React.FC = () => {
             phone: formData.phone.trim() ? formatIndianMobileForStorage(formData.phone) : '',
             updated_at: new Date().toISOString()
           })
-          .eq('id', getRecordId(editingCustomer))
+          .eq('id', customerId)
         
         if (error) throw error
+        await logCustomerUpdate(customerId, formData.name, performedBy)
       } else {
-        const { error } = await db
+        const { data, error } = await db
           .from('customers')
           .insert([{
             ...formData,
@@ -109,6 +120,9 @@ const Customers: React.FC = () => {
           }])
         
         if (error) throw error
+        const created = (data as any)?.[0]
+        const customerId = String(created?.id || created?._id || '')
+        await logCustomerCreation(customerId, formData.name, performedBy)
       }
       
       await fetchCustomers()
@@ -139,12 +153,18 @@ const Customers: React.FC = () => {
     }
     
     try {
+      const customerId = getRecordId(customer)
       const { error } = await db
         .from('customers')
         .delete()
-        .eq('id', getRecordId(customer))
+        .eq('id', customerId)
       
       if (error) throw error
+      await logCustomerDeletion(
+        customerId,
+        customer.name,
+        user?.email || user?.full_name || 'admin',
+      )
       await fetchCustomers()
     } catch (error) {
       console.error('Error deleting customer:', error)

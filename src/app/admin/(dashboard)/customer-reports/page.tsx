@@ -3,19 +3,28 @@
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { db, Customer } from '@/lib/database'
-import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { useDarkMode } from '@/hooks/useDarkMode'
 import { formatDisplayDateValue } from '@/components/ui/date-utils'
 import { toDisplayInitial, toDisplayTitle } from '@/lib/textFormat'
-import { AdminTable, AdminTableBody, AdminTableEmpty, AdminTableHead, AdminTablePanel, AdminTableSkeleton, SearchInput } from '@/components/ui'
+import {
+  AdminTable,
+  AdminTableBody,
+  AdminTableEmpty,
+  AdminTableHead,
+  AdminTablePanel,
+  AdminTableRow,
+  AdminTableSkeleton,
+  Button,
+  SearchInput,
+  Select,
+} from '@/components/ui'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import {
   UserIcon,
   EnvelopeIcon,
   PhoneIcon,
-  MagnifyingGlassIcon,
   EyeIcon,
-  DocumentTextIcon,
   TicketIcon,
   CurrencyRupeeIcon,
   ChartBarIcon
@@ -32,6 +41,9 @@ interface CustomerAnalytics {
 interface CustomerWithAnalytics extends Customer {
   analytics: CustomerAnalytics
 }
+
+const customerRecordId = (customer: CustomerWithAnalytics) =>
+  String(customer.id || (customer as Customer & { _id?: string })._id || "").trim()
 
 const CustomerReports: React.FC = () => {
   const router = useRouter()
@@ -70,7 +82,10 @@ const CustomerReports: React.FC = () => {
 
       // Calculate analytics for each customer
       const customersWithAnalytics: CustomerWithAnalytics[] = (customersData || []).map(customer => {
-        const customerBookings = (bookingsData || []).filter(booking => booking.customer_id === customer.id)
+        const id = customerRecordId(customer)
+        const customerBookings = (bookingsData || []).filter(
+          (booking) => String(booking.customer_id || "") === id,
+        )
         
         const totalBookings = customerBookings.length
         const totalTickets = customerBookings.reduce((sum, booking) => {
@@ -180,33 +195,30 @@ const CustomerReports: React.FC = () => {
             Analyze customer behavior and booking patterns
           </p>
         </div>
-        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center xl:w-auto">
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end xl:w-auto">
           <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search customers..." containerClassName="w-full sm:w-72" />
-          <select
+          <Select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            className={`min-h-11 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors duration-200 ${
-              darkMode
-                ? 'bg-slate-900 border-slate-700 text-slate-100 focus:border-slate-500'
-                : 'bg-white border-slate-200 text-slate-900 focus:border-slate-400'
-            } focus:outline-none focus:ring-[3px] focus:ring-primary-500/20`}
-          >
-            <option value="totalSpent">Sort by Revenue</option>
-            <option value="totalBookings">Sort by Bookings</option>
-            <option value="name">Sort by Name</option>
-            <option value="lastBooking">Sort by Last Booking</option>
-          </select>
-          <button
+            onChange={(value) => setSortBy(value as typeof sortBy)}
+            searchable={false}
+            className="w-full sm:w-52"
+            options={[
+              { value: 'totalSpent', label: 'Sort by Revenue' },
+              { value: 'totalBookings', label: 'Sort by Bookings' },
+              { value: 'name', label: 'Sort by Name' },
+              { value: 'lastBooking', label: 'Sort by Last Booking' },
+            ]}
+          />
+          <Button
+            type="button"
+            variant="secondary"
             onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-            className={`min-h-11 min-w-11 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors duration-200 ${
-              darkMode
-                ? 'bg-slate-900 border-slate-700 text-slate-100 hover:bg-slate-800'
-                : 'bg-white border-slate-200 text-slate-900 hover:bg-slate-50'
-            }`}
-            aria-label={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+            aria-label={sortOrder === 'asc' ? 'Sort ascending (low to high)' : 'Sort descending (high to low)'}
+            className="shrink-0 gap-2"
           >
-            {sortOrder === 'asc' ? 'â†‘' : 'â†“'}
-          </button>
+            {sortOrder === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
+            {sortOrder === 'asc' ? 'Low to high' : 'High to low'}
+          </Button>
         </div>
       </div>
 
@@ -269,56 +281,6 @@ const CustomerReports: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters and Search */}
-      <div className="hidden">
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="flex-1 max-w-md">
-            <div className="relative">
-              <MagnifyingGlassIcon className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
-              <input
-                type="text"
-                placeholder="Search customers..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className={`w-full pl-10 pr-4 py-2 rounded-lg border transition-colors duration-200 ${
-                  darkMode 
-                    ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-400 focus:border-slate-500' 
-                    : 'bg-white border-slate-300 text-slate-900 placeholder-slate-500 focus:border-slate-400'
-                } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
-              />
-            </div>
-          </div>
-          
-          <div className="flex gap-2">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              className={`px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                darkMode 
-                  ? 'bg-slate-800 border-slate-600 text-slate-100 focus:border-slate-500' 
-                  : 'bg-white border-slate-300 text-slate-900 focus:border-slate-400'
-              } focus:outline-none focus:ring-2 focus:ring-primary-500/20`}
-            >
-              <option value="totalSpent">Sort by Revenue</option>
-              <option value="totalBookings">Sort by Bookings</option>
-              <option value="name">Sort by Name</option>
-              <option value="lastBooking">Sort by Last Booking</option>
-            </select>
-            
-            <button
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              className={`px-4 py-2 rounded-lg border transition-colors duration-200 ${
-                darkMode 
-                  ? 'bg-slate-800 border-slate-600 text-slate-100 hover:bg-slate-700' 
-                  : 'bg-white border-slate-300 text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              {sortOrder === 'asc' ? '↑' : '↓'}
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Customer Reports Table */}
       <AdminTablePanel>
         <AdminTable>
@@ -360,15 +322,13 @@ const CustomerReports: React.FC = () => {
             {loading ? (
               <AdminTableSkeleton columns={6} leadColumn="avatar" />
             ) : filteredAndSortedCustomers.length === 0 ? (
-              <AdminTableEmpty colSpan={6}>
+              <AdminTableEmpty key="customers-empty" colSpan={6}>
                 {searchTerm ? 'No customers found. Try adjusting your search terms.' : 'No customer data available yet.'}
               </AdminTableEmpty>
             ) : (
-              filteredAndSortedCustomers.map((customer) => (
-                    <motion.tr
-                      key={customer.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
+              filteredAndSortedCustomers.map((customer, index) => (
+                    <AdminTableRow
+                      key={customerRecordId(customer) || `customer-row-${index}`}
                       className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'} transition-colors duration-200`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -446,14 +406,14 @@ const CustomerReports: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button
-                          onClick={() => router.push(`/admin/customers/${customer.id}`)}
+                          onClick={() => router.push(`/admin/customers/${customerRecordId(customer)}`)}
                           className={`p-2 rounded-lg transition-colors duration-200 ${darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
                           title="View Details"
                         >
                           <EyeIcon className="h-4 w-4" />
                         </button>
                       </td>
-                    </motion.tr>
+                    </AdminTableRow>
                   ))
             )}
           </AdminTableBody>

@@ -1,5 +1,5 @@
 import connectDB, { getGenericModel } from "@/lib/db";
-import { collectDueCommissionBookings } from "@/lib/agentCommission";
+import { collectDueCommissionBookings, filterShowCommissionBookings, isShowBooking } from "@/lib/agentCommission";
 import { createNotification, type NotificationInput } from "@/lib/notificationStore";
 import { readStore, writeStore } from "@/lib/localStore";
 
@@ -36,8 +36,12 @@ export type DueCommissionSummary = {
   periodKeys: string[];
 };
 
-export function collectDueCommissionSummary(agents: any[], bookings: any[]): DueCommissionSummary {
-  const { summary } = collectDueCommissionBookings(agents, bookings);
+export function collectDueCommissionSummary(
+  agents: any[],
+  bookings: any[],
+  shows: any[] = [],
+): DueCommissionSummary {
+  const { summary } = collectDueCommissionBookings(agents, bookings, new Date(), shows);
   return {
     agentCount: summary.agentCount,
     totalAmount: summary.totalAmount,
@@ -109,6 +113,7 @@ function notificationExistsLocal(store: any, dedupKey: string) {
 async function ensureMongoCommissionDueReminders(slot: ReminderSlot, dateKey: string) {
   const Agent = getGenericModel("agents") as any;
   const Booking = getGenericModel("bookings") as any;
+  const Show = getGenericModel("shows") as any;
   const [agents, bookings] = await Promise.all([
     Agent.find({}).lean(),
     Booking.find({
@@ -117,8 +122,13 @@ async function ensureMongoCommissionDueReminders(slot: ReminderSlot, dateKey: st
       commission_amount: { $gt: 0 },
     }).lean(),
   ]);
+  const showBookings = filterShowCommissionBookings(bookings);
+  const showIds = Array.from(new Set(showBookings.map((booking: any) => String(booking.show_id || "")).filter(Boolean)));
+  const shows = showIds.length
+    ? await Show.find({ $or: [{ id: { $in: showIds } }, { _id: { $in: showIds } }] }).lean()
+    : [];
 
-  const summary = collectDueCommissionSummary(agents, bookings);
+  const summary = collectDueCommissionSummary(agents, showBookings, shows);
   if (summary.agentCount === 0 || summary.totalAmount <= 0) {
     return { created: false, reason: "nothing_due" as const };
   }
@@ -134,7 +144,12 @@ async function ensureMongoCommissionDueReminders(slot: ReminderSlot, dateKey: st
 
 async function ensureLocalCommissionDueReminders(store: any, slot: ReminderSlot, dateKey: string) {
   store.notifications = store.notifications || [];
-  const summary = collectDueCommissionSummary(store.agents || [], store.bookings || []);
+  const showBookings = (store.bookings || []).filter(isShowBooking);
+  const showIds = Array.from(new Set(showBookings.map((booking: any) => String(booking.show_id || "")).filter(Boolean)));
+  const shows = (store.shows || []).filter(
+    (show: any) => showIds.includes(recordId(show)) || showIds.includes(String(show.id)),
+  );
+  const summary = collectDueCommissionSummary(store.agents || [], showBookings, shows);
   if (summary.agentCount === 0 || summary.totalAmount <= 0) {
     return { created: false, reason: "nothing_due" as const };
   }

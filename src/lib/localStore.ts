@@ -1,7 +1,9 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { assignAgentIds } from "@/lib/agentId";
+import { assignVendorIds } from "@/lib/vendorId";
 import { backfillAgentPublicIdsLocal } from "@/lib/agentIdBackfill";
+import { backfillVendorPublicIdsLocal } from "@/lib/vendorIdBackfill";
 import { getSeedData } from "./seedData";
 import { countBookedSeats, getAvailabilityStatus, getShowCapacity, isShowBookableAt } from "./booking";
 import { syncActivityStatusesLocal, syncShowStatusesLocal } from "./catalogLifecycle";
@@ -28,6 +30,19 @@ const initialStore = (): Store => {
         commission_notification_method: "SMS",
         remaining_amount_notification_method: "SMS",
         payout_frequency: "MONTHLY",
+        active: true,
+        created_at: now,
+        updated_at: now,
+      },
+    ],
+    vendors: [
+      {
+        id: "VND-0001",
+        vendor_code: "VND-0001",
+        name: "Activity Partner",
+        phone: "+91 98765 43211",
+        email: "",
+        payout_method: "GPAY",
         active: true,
         created_at: now,
         updated_at: now,
@@ -156,6 +171,11 @@ export const localQuery = async ({
     if (result.updated > 0) await writeStore(store);
   }
 
+  if (collection === "vendors" && operation === "select") {
+    const result = await backfillVendorPublicIdsLocal(store);
+    if (result.updated > 0) await writeStore(store);
+  }
+
   if (operation === "select") {
     if (collection === "shows" && syncShowStatusesLocal(store)) await writeStore(store);
     if (collection === "activities" && syncActivityStatusesLocal(store)) await writeStore(store);
@@ -174,6 +194,12 @@ export const localQuery = async ({
       const payload = insertPayload || [];
       if (collection === "agents") {
         return assignAgentIds(store.agents || [], payload).map((row: any) => ({
+          ...row,
+          id: row.id || `${collection}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }));
+      }
+      if (collection === "vendors") {
+        return assignVendorIds(store.vendors || [], payload).map((row: any) => ({
           ...row,
           id: row.id || `${collection}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         }));

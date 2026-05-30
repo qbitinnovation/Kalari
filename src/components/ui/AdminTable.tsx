@@ -126,10 +126,8 @@ export function AdminTableSkeleton({
 }: AdminTableSkeletonProps) {
   const barWidths = ['w-full', 'w-3/4', 'w-2/3', 'w-4/5', 'w-1/2', 'w-3/5', 'w-2/5']
 
-  return (
-    <>
-      {Array.from({ length: rows }).map((_, rowIndex) => (
-        <AdminTableRow key={rowIndex} className="hover:bg-transparent dark:hover:bg-transparent">
+  return Array.from({ length: rows }).map((_, rowIndex) => (
+        <AdminTableRow key={`skeleton-row-${rowIndex}`} className="hover:bg-transparent dark:hover:bg-transparent">
           {Array.from({ length: columns }).map((_, colIndex) => (
             <AdminTableCell
               key={colIndex}
@@ -149,7 +147,5 @@ export function AdminTableSkeleton({
             </AdminTableCell>
           ))}
         </AdminTableRow>
-      ))}
-    </>
-  )
+      ))
 }

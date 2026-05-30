@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { db, Show, Layout } from "@/lib/database";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { db, Show, Layout, type Agent } from "@/lib/database";
+import { Plus, Pencil, Trash2, X, Eye } from "lucide-react";
 import { format } from "date-fns";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import {
@@ -14,10 +14,17 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { activityImages } from "@/lib/seedData";
 import { isActiveBookingReservation } from "@/lib/booking";
-import { resolveShowStatus } from "@/lib/catalogLifecycle";
+import {
+  getShowDisplayStatus,
+  isShowCompleted,
+  resolveShowStatus,
+  showDisplayStatusLabels,
+  showDisplayStatusStyles,
+} from "@/lib/catalogLifecycle";
 import { canBookShow, getAdminBookingUrl } from "@/lib/adminBooking";
 import { getDefaultArenaStructure } from "@/lib/arenaLayout";
 import { toDisplayTitle } from "@/lib/textFormat";
+import { getAgentContact, getAgentDisplayName } from "@/lib/agentCommission";
 import { formatDisplayDateValue, formatDisplayTimeValue } from "@/components/ui/date-utils";
 import {
   Button,
@@ -49,11 +56,14 @@ const Shows: React.FC = () => {
   const [shows, setShows] = useState<Show[]>([]);
   const [allShows, setAllShows] = useState<Show[]>([]);
   const [layouts, setLayouts] = useState<Layout[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [agentCommissionError, setAgentCommissionError] = useState("");
   const darkMode = useDarkMode();
   const [showModal, setShowModal] = useState(false);
   const [editingShow, setEditingShow] = useState<Show | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>("");
+  const [listFilter, setListFilter] = useState<"active" | "completed" | "all">("active");
   const [formData, setFormData] = useState({
     title: "",
     date: "",
@@ -63,29 +73,27 @@ const Shows: React.FC = () => {
     description: "",
     layout_id: "",
     status: "ACTIVE" as "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE",
+    agent_id: "",
+    agent_commission_percentage: "",
   });
-  const showStatusLabels: Record<string, string> = {
-    ACTIVE: "Active",
-    HOUSE_FULL: "House Full",
-    SHOW_STARTED: "Show Started",
-    SHOW_DONE: "Show Done",
-  };
-
   useEffect(() => {
     fetchShows();
     fetchLayouts();
+    fetchAgents();
   }, []);
 
   useEffect(() => {
-    if (selectedDate) {
-      const filteredShows = allShows.filter(
-        (show) => show.date === selectedDate,
-      );
-      setShows(filteredShows);
-    } else {
-      setShows(allShows);
+    let filtered = allShows;
+    if (listFilter === "active") {
+      filtered = filtered.filter((show) => !isShowCompleted(show));
+    } else if (listFilter === "completed") {
+      filtered = filtered.filter((show) => isShowCompleted(show));
     }
-  }, [selectedDate, allShows]);
+    if (selectedDate) {
+      filtered = filtered.filter((show) => show.date === selectedDate);
+    }
+    setShows(filtered);
+  }, [selectedDate, allShows, listFilter]);
 
   const fetchShows = async () => {
     try {
@@ -210,6 +218,41 @@ const Shows: React.FC = () => {
     }
   };
 
+  const fetchAgents = async () => {
+    try {
+      await fetch("/api/agents/backfill", { method: "POST" }).catch(() => null);
+      const { data, error } = await db
+        .from("agents")
+        .select("*")
+        .eq("active", true)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      const legacy = await db
+        .from("users")
+        .select("*")
+        .eq("role", "agent")
+        .eq("active", true)
+        .order("full_name", { ascending: true });
+      const legacyAgents = (legacy.data || []).map((agent: any) => ({
+        ...agent,
+        name: agent.full_name,
+        phone: agent.phone || agent.email,
+        payout_frequency: "MONTHLY",
+      }));
+      const existingIds = new Set(
+        (data || []).map((agent: any) => String(agent.id || agent._id)),
+      );
+      setAgents([
+        ...(data || []),
+        ...legacyAgents.filter(
+          (agent: any) => !existingIds.has(String(agent.id || agent._id)),
+        ),
+      ]);
+    } catch (error) {
+      console.error("Error fetching agents:", error);
+    }
+  };
+
   const fetchLayouts = async () => {
     try {
       const { data, error } = await db
@@ -243,6 +286,19 @@ const Shows: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (formData.agent_id) {
+      const raw = String(formData.agent_commission_percentage ?? "").trim();
+      const pct = Number(raw);
+      if (!raw) {
+        setAgentCommissionError("Agent commission percentage is required when a linked agent is selected.");
+        return;
+      }
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        setAgentCommissionError("Enter a valid commission percentage between 0 and 100.");
+        return;
+      }
+    }
+    setAgentCommissionError("");
     try {
       const layoutId = formData.layout_id || await ensureDefaultKalariLayoutId();
       const showData = {
@@ -256,8 +312,10 @@ const Shows: React.FC = () => {
         capacity: null,
         layout_id: layoutId,
         activity_id: null,
-        agent_id: null,
-        agent_commission_percentage: 0,
+        agent_id: formData.agent_id || null,
+        agent_commission_percentage: formData.agent_id
+          ? Number(formData.agent_commission_percentage || 0)
+          : 0,
         status: formData.status,
       };
 
@@ -307,7 +365,10 @@ const Shows: React.FC = () => {
       description: show.description || "",
       layout_id: show.layout_id || "",
       status: (show.status as any) || "ACTIVE",
+      agent_id: show.agent_id || "",
+      agent_commission_percentage: String(show.agent_commission_percentage || 0),
     });
+    setAgentCommissionError("");
     setShowModal(true);
   };
 
@@ -345,7 +406,10 @@ const Shows: React.FC = () => {
       description: "",
       layout_id: findDefaultKalariLayoutId(layouts),
       status: "ACTIVE",
+      agent_id: "",
+      agent_commission_percentage: "",
     });
+    setAgentCommissionError("");
   };
 
   return (
@@ -364,6 +428,17 @@ const Shows: React.FC = () => {
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end lg:w-auto">
+          <Select
+            label="Show list"
+            value={listFilter}
+            onChange={(value) => setListFilter(value as "active" | "completed" | "all")}
+            options={[
+              { value: "active", label: "Upcoming & in progress" },
+              { value: "completed", label: "Completed" },
+              { value: "all", label: "All shows" },
+            ]}
+            className="w-full sm:w-56"
+          />
           <DatePicker
             label="Filter by Date"
             value={selectedDate}
@@ -419,9 +494,12 @@ const Shows: React.FC = () => {
               ) : shows.length === 0 ? (
                 <AdminTableEmpty colSpan={6}>No shows found.</AdminTableEmpty>
               ) : (
-                shows.map((show) => (
+                shows.map((show) => {
+                  const displayStatus = getShowDisplayStatus(show);
+                  const showId = show.id || String((show as any)._id);
+                  return (
                   <tr
-                    key={show.id || (show as any)._id}
+                    key={showId}
                     className={
                       darkMode ? "hover:bg-slate-800/30" : "hover:bg-slate-50"
                     }
@@ -455,21 +533,20 @@ const Shows: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-center">
                       <span
-                        className={`px-2 py-1 rounded-full text-xs font-bold ${
-                          show.status === "ACTIVE"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
-                            : show.status === "HOUSE_FULL"
-                              ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
-                              : "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400"
-                        }`}
+                        className={`px-2 py-1 rounded-full text-xs font-bold ${showDisplayStatusStyles[displayStatus]}`}
                       >
-                        {showStatusLabels[show.status || ""] || "Unknown"}
+                        {showDisplayStatusLabels[displayStatus]}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex flex-wrap items-center justify-center gap-2">
+                        <Link href={`/admin/shows/${showId}`}>
+                          <Button size="sm" variant="ghost" aria-label="View show">
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </Link>
                         {canBookShow(show) ? (
-                          <Link href={getAdminBookingUrl({ showId: show.id || String((show as any)._id) })}>
+                          <Link href={getAdminBookingUrl({ showId })}>
                             <Button size="sm">Book Now</Button>
                           </Link>
                         ) : (
@@ -496,7 +573,8 @@ const Shows: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ))
+                );
+                })
               )}
             </AdminTableBody>
           </AdminTable>
@@ -569,6 +647,45 @@ const Shows: React.FC = () => {
                   { value: "SHOW_DONE", label: "Show Done" },
                 ]}
               />
+              <Select
+                label="Linked Agent (optional)"
+                value={formData.agent_id || "__none__"}
+                onChange={(agent_id) => {
+                  const linked = agent_id !== "__none__";
+                  setAgentCommissionError("");
+                  setFormData({
+                    ...formData,
+                    agent_id: linked ? agent_id : "",
+                    agent_commission_percentage: linked ? formData.agent_commission_percentage : "",
+                  });
+                }}
+                placeholder="No linked agent"
+                options={[
+                  { value: "__none__", label: "No linked agent" },
+                  ...agents.map((agent) => ({
+                    value: String(agent.id || (agent as { _id?: string })._id),
+                    label: `${getAgentDisplayName(agent)}${getAgentContact(agent) ? ` (${getAgentContact(agent)})` : ""}`,
+                  })),
+                ]}
+                searchable={agents.length > 3}
+              />
+              {formData.agent_id ? (
+                <Input
+                  label="Agent Commission (%)"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  required
+                  value={formData.agent_commission_percentage}
+                  error={agentCommissionError}
+                  onChange={(agent_commission_percentage) => {
+                    setAgentCommissionError("");
+                    setFormData({ ...formData, agent_commission_percentage });
+                  }}
+                  placeholder="e.g. 10"
+                />
+              ) : null}
               <Input
                 label="Image URL"
                 type="url"

@@ -1,6 +1,7 @@
 import type { Show } from "@/lib/database";
 import { isActivityPubliclyBookable } from "@/lib/activityAvailability";
 import { isShowBookableAt } from "@/lib/booking";
+import { isShowCompleted } from "@/lib/catalogLifecycle";
 
 type BookableActivity = {
   status?: string;
@@ -26,6 +27,7 @@ export function getAdminBookingUrl(options: AdminBookingUrlOptions) {
 }
 
 export function canBookShow(show: Pick<Show, "status" | "date" | "time" | "availability_status" | "available_count">) {
+  if (isShowCompleted(show)) return false;
   if (show.status !== "ACTIVE") return false;
   if (!isShowBookableAt(show)) return false;
   if (show.availability_status === "SOLD_OUT") return false;

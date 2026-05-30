@@ -14,6 +14,7 @@ import {
   parseSeatCodes,
 } from "@/lib/booking";
 import { createNotification } from "@/lib/notificationStore";
+import { buildShowAgentCommissionFields } from "@/lib/agentCommission";
 
 type HoldAction = "CONFIRM" | "RELEASE";
 
@@ -112,22 +113,46 @@ const ensureLocalCustomer = (store: any, form: any) => {
   return customer;
 };
 
-const buildHold = ({ show, seatCodes, customer, form }: { show: any; seatCodes: string[]; customer: any; form: any }) => {
+const findAgentForShow = async (show: any) => {
+  const agentId = String(show?.agent_id || "");
+  if (!agentId) return null;
+  try {
+    await connectDB();
+    const Agent = getGenericModel("agents") as any;
+    return findDocument(Agent, agentId);
+  } catch {
+    const store = await readStore();
+    return (store.agents || []).find((agent: any) => recordId(agent) === agentId) || null;
+  }
+};
+
+const buildHold = async ({
+  show,
+  seatCodes,
+  customer,
+  form,
+}: {
+  show: any;
+  seatCodes: string[];
+  customer: any;
+  form: any;
+}) => {
   const now = nowIso();
+  const totalAmount = Number(show.price || 0) * seatCodes.length;
+  const agent = await findAgentForShow(show);
+  const commissionFields = buildShowAgentCommissionFields(show, totalAmount, new Date(now), agent);
+
   return {
     booking_reference: createBookingReference(new Date(now)),
     show_id: recordId(show),
+    booking_type: "SHOW",
     seat_code: JSON.stringify(seatCodes),
     booked_by: String(form.name).trim(),
     customer_id: recordId(customer),
     payment_method: "RAZORPAY",
     payment_status: "PAYMENT_PENDING",
-    total_amount: Number(show.price || 0) * seatCodes.length,
-    agent_id: null,
-    agent_commission_percentage: 0,
-    commission_amount: 0,
-    commission_status: "PAID",
-    commission_period_key: null,
+    total_amount: totalAmount,
+    ...commissionFields,
     booking_time: now,
     status: "HELD",
     hold_token: holdToken(),
@@ -189,7 +214,7 @@ export async function POST(req: NextRequest) {
     if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
     const customer = await ensureMongoCustomer(Customer, form);
-    const booking = await Booking.create(buildHold({ show, seatCodes, customer, form }));
+    const booking = await Booking.create(await buildHold({ show, seatCodes, customer, form }));
     return NextResponse.json({ data: holdPayload(booking) }, { status: 201 });
   } catch (error: any) {
     const showId = String(body?.showId || "");
@@ -214,9 +239,10 @@ export async function POST(req: NextRequest) {
       );
       if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
       const customer = ensureLocalCustomer(store, form);
+      const holdData = await buildHold({ show, seatCodes, customer, form });
       const booking = {
         id: `bookings-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ...buildHold({ show, seatCodes, customer, form }),
+        ...holdData,
       };
       store.bookings = store.bookings || [];
       store.bookings.push(booking);

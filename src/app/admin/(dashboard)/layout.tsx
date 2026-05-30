@@ -33,7 +33,8 @@ import {
   ShieldCheck,
   Map,
   Mail,
-  Globe2
+  Globe2,
+  Store
 } from 'lucide-react'
 import { db, type Notification } from '@/lib/database'
 import { Button, Input } from '@/components/ui'
@@ -280,11 +281,20 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }
 
   const getNavigation = () => {
+    const primaryNavigation = [
+      { name: 'Shows', href: '/admin/shows', icon: Film },
+      { name: 'Activities', href: '/admin/activities', icon: Map },
+      { name: 'Vendors', href: '/admin/vendors', icon: Store },
+      { name: 'Vendor Payouts', href: '/admin/vendor-payouts', icon: WalletCards },
+      { name: 'Agents', href: '/admin/agents', icon: Users },
+      { name: 'Commissions', href: '/admin/commissions', icon: WalletCards },
+      { name: 'Customers', href: '/admin/customers', icon: User },
+    ]
     const staffNavigation = [
       { name: 'Shows', href: '/admin/shows', icon: Film },
       { name: 'Activities', href: '/admin/activities', icon: Map },
-      { name: 'Counter Booking', href: '/admin/booking', icon: Ticket },
       { name: 'Customers', href: '/admin/customers', icon: User },
+      { name: 'Counter Booking', href: '/admin/booking', icon: Ticket },
       { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
       { name: 'Messages', href: '/admin/messages', icon: Mail },
       { name: 'Website Content', href: '/admin/website-content', icon: Globe2 },
@@ -292,13 +302,15 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     if (user?.role === 'admin') {
       return [
         { name: 'Dashboard', href: '/admin', icon: Home },
-        ...staffNavigation,
+        ...primaryNavigation,
+        { name: 'Counter Booking', href: '/admin/booking', icon: Ticket },
+        { name: 'Ticket History', href: '/admin/tickets', icon: Ticket },
+        { name: 'Messages', href: '/admin/messages', icon: Mail },
+        { name: 'Website Content', href: '/admin/website-content', icon: Globe2 },
         { name: 'Layouts', href: '/admin/layouts', icon: LayoutGrid },
         { name: 'Customer Reports', href: '/admin/customer-reports', icon: FileText },
         { name: 'Reports', href: '/admin/reports', icon: BarChart },
         { name: 'Analytics', href: '/admin/analytics', icon: LineChart },
-        { name: 'Agents', href: '/admin/agents', icon: Users },
-        { name: 'Commissions', href: '/admin/commissions', icon: WalletCards },
         { name: 'Staff Management', href: '/admin/staff', icon: ShieldCheck },
         { name: 'Settings', href: '/admin/settings', icon: SettingsIcon },
       ]
@@ -317,6 +329,8 @@ const AdminLayoutUI: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     '/admin/customers': 'Customers',
     '/admin/tickets': 'Ticket History',
     '/admin/activities': 'Activities',
+    '/admin/vendors': 'Vendors',
+    '/admin/vendor-payouts': 'Vendor Payouts',
     '/admin/messages': 'Messages',
     '/admin/website-content': 'Website Content',
     '/admin/layouts': 'Seat Layouts',

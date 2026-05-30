@@ -12,17 +12,18 @@ import {
   Ticket,
   Trash2,
 } from "lucide-react";
-import { db, type Agent } from "@/lib/database";
+import { db, type Vendor } from "@/lib/database";
 import { activityImages } from "@/lib/seedData";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { canBookActivity, getAdminBookingUrl } from "@/lib/adminBooking";
-import { getAgentDisplayName } from "@/lib/agentCommission";
+import { getVendorDisplayName, getVendorContact } from "@/lib/vendorPayout";
 import {
   activityDisplayStatusLabels,
   activityDisplayStatusStyles,
   formatAdminActivityDates,
   getActivityDisplayStatus,
 } from "@/lib/activityAvailability";
+import { summarizeActivitySales } from "@/lib/catalogSalesSummary";
 import { Button } from "@/components/ui";
 import { formatDisplayDateValue, todayDateValue } from "@/components/ui/date-utils";
 import { toDisplayTitle } from "@/lib/textFormat";
@@ -40,8 +41,8 @@ type Activity = {
   booking_price?: number;
   daily_capacity?: number;
   booking_status?: "ACTIVE" | "PAUSED";
-  agent_id?: string;
-  agent_commission_percentage?: number;
+  vendor_id?: string;
+  platform_commission_percentage?: number;
   rating: number;
   review_count: number;
   image: string;
@@ -99,7 +100,8 @@ export default function ActivityDetailPage() {
   const activityId = String(params.id || "");
   const darkMode = useDarkMode();
   const [activity, setActivity] = useState<Activity | null>(null);
-  const [agent, setAgent] = useState<Agent | null>(null);
+  const [vendor, setVendor] = useState<Vendor | null>(null);
+  const [sales, setSales] = useState({ bookingCount: 0, ticketsSold: 0, capacity: 0, revenue: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -118,12 +120,19 @@ export default function ActivityDetailPage() {
         .eq("id", activityId)
         .single();
       if (fetchError || !data) throw new Error("Activity not found.");
+      const { data: bookings } = await db
+        .from("bookings")
+        .select("*")
+        .eq("activity_id", recordId(data))
+        .eq("status", "CONFIRMED");
+
       setActivity(data);
-      if (data.agent_id) {
-        const { data: agentData } = await db.from("agents").select("*").eq("id", data.agent_id).single();
-        setAgent(agentData || null);
+      setSales(summarizeActivitySales(data, bookings || []));
+      if (data.vendor_id) {
+        const { data: vendorData } = await db.from("vendors").select("*").eq("id", data.vendor_id).single();
+        setVendor(vendorData || null);
       } else {
-        setAgent(null);
+        setVendor(null);
       }
     } catch (err: any) {
       setError(err.message || "Failed to load activity.");
@@ -240,6 +249,21 @@ export default function ActivityDetailPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <InfoCard
           darkMode={darkMode}
+          title="Sales summary"
+          rows={[
+            [
+              "Tickets sold",
+              `${sales.ticketsSold} confirmed (${sales.bookingCount} bookings)`,
+            ],
+            ["Revenue", `Rs. ${sales.revenue.toLocaleString("en-IN")}`],
+            [
+              "Season capacity (est.)",
+              `${activity.daily_capacity || 20}/day · up to ${sales.capacity} tickets`,
+            ],
+          ]}
+        />
+        <InfoCard
+          darkMode={darkMode}
           title="Pricing"
           rows={[
             ["Ticket price", `Rs. ${activity.booking_price || activity.price}`],
@@ -261,12 +285,13 @@ export default function ActivityDetailPage() {
         />
         <InfoCard
           darkMode={darkMode}
-          title="Agent"
+          title="Vendor"
           rows={[
-            ["Linked agent", agent ? getAgentDisplayName(agent) : "None"],
+            ["Linked vendor", vendor ? getVendorDisplayName(vendor) : "None"],
+            ["Contact", vendor ? getVendorContact(vendor) || "—" : "—"],
             [
-              "Commission",
-              activity.agent_id ? `${activity.agent_commission_percentage || 0}%` : "—",
+              "Platform commission",
+              activity.vendor_id ? `${activity.platform_commission_percentage || 0}%` : "—",
             ],
             ["Category", toDisplayTitle(activity.category)],
           ]}

@@ -41,6 +41,33 @@ export const resolveActivityStatus = (
   return "ACTIVE";
 };
 
+export type ShowDisplayStatus = "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "COMPLETED";
+
+export const getShowDisplayStatus = (show: any, now = new Date()): ShowDisplayStatus => {
+  const resolved = resolveShowStatus(show, now);
+  if (resolved === "SHOW_DONE") return "COMPLETED";
+  if (resolved === "SHOW_STARTED") return "SHOW_STARTED";
+  if (resolved === "HOUSE_FULL") return "HOUSE_FULL";
+  return "ACTIVE";
+};
+
+export const isShowCompleted = (show: any, now = new Date()) =>
+  getShowDisplayStatus(show, now) === "COMPLETED";
+
+export const showDisplayStatusLabels: Record<ShowDisplayStatus, string> = {
+  ACTIVE: "Active",
+  HOUSE_FULL: "House full",
+  SHOW_STARTED: "In progress",
+  COMPLETED: "Completed",
+};
+
+export const showDisplayStatusStyles: Record<ShowDisplayStatus, string> = {
+  ACTIVE: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  HOUSE_FULL: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+  SHOW_STARTED: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+  COMPLETED: "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+};
+
 /** Past or finished shows should not appear on the public website. */
 export const isShowPubliclyAccessible = (show: any, now = new Date()) => {
   if (resolveShowStatus(show, now) === "SHOW_DONE") return false;

@@ -5,13 +5,14 @@ import { createBookingReference, createTicketCodes, parseSeatCodes } from "@/lib
 import { readStore, writeStore } from "@/lib/localStore";
 import { createNotification } from "@/lib/notificationStore";
 import { isActivityBookingDateAllowed, isActivityPubliclyBookable } from "@/lib/activityAvailability";
-import { calculateEventCommission, getCommissionPeriodKey } from "@/lib/agentCommission";
+import { buildVendorPayoutFields } from "@/lib/vendorPayout";
 import {
   getBookingCustomerErrors,
   getBookingEmailError,
   hasBookingCustomerErrors,
   normalizeBookingPhone,
 } from "@/lib/bookingCustomer";
+import { logBookingCreationServer } from "@/utils/activityLogger.server";
 import { isValidIndianMobileDigits } from "@/lib/indianPhone";
 
 const recordId = (record: any) => String(record?.id || record?._id || "");
@@ -65,59 +66,33 @@ const getActivityCapacity = (activity: any) => Number(activity?.daily_capacity |
 const isActivityActive = (activity: any) =>
   String(activity?.status || "ACTIVE").toUpperCase() === "ACTIVE";
 
-const findLocalAgent = (store: any, agentId: string) =>
-  (store.agents || []).find((agent: any) => recordId(agent) === agentId);
+const findLocalVendor = (store: any, vendorId: string) =>
+  (store.vendors || []).find((vendor: any) => recordId(vendor) === vendorId);
 
-async function findAgent(agentId: string) {
-  if (!agentId) return null;
+async function findVendor(vendorId: string) {
+  if (!vendorId) return null;
   try {
     await connectDB();
-    const Agent = getGenericModel("agents") as any;
-    const or: any[] = [{ id: agentId }];
-    if (isObjectId(agentId)) or.push({ _id: new mongoose.Types.ObjectId(agentId) });
-    return Agent.findOne({ $or: or }).lean();
+    const Vendor = getGenericModel("vendors") as any;
+    const or: any[] = [{ id: vendorId }];
+    if (isObjectId(vendorId)) or.push({ _id: new mongoose.Types.ObjectId(vendorId) });
+    return Vendor.findOne({ $or: or }).lean();
   } catch {
     const store = await readStore();
-    return findLocalAgent(store, agentId);
+    return findLocalVendor(store, vendorId);
   }
 }
 
-const buildCommissionFields = async (activity: any, totalAmount: number, bookingTime: Date) => {
-  const agentId = String(activity?.agent_id || "");
-  const commissionPercentage = agentId ? Number(activity?.agent_commission_percentage || 0) : 0;
-  const commissionAmount = agentId
-    ? calculateEventCommission(totalAmount, commissionPercentage)
-    : 0;
-  const agent = commissionAmount > 0 ? await findAgent(agentId) : null;
-  return {
-    agent_id: agentId || null,
-    agent_commission_percentage: commissionPercentage,
-    commission_amount: commissionAmount,
-    commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
-    commission_period_key:
-      commissionAmount > 0
-        ? getCommissionPeriodKey(bookingTime, agent?.payout_frequency || "DAILY")
-        : null,
-  };
+const buildActivityPayoutFields = async (activity: any, totalAmount: number, bookingTime: Date) => {
+  const vendorId = String(activity?.vendor_id || "");
+  const vendor = vendorId ? await findVendor(vendorId) : null;
+  return buildVendorPayoutFields(activity, totalAmount, bookingTime, vendor);
 };
 
-const buildLocalCommissionFields = (store: any, activity: any, totalAmount: number, bookingTime: Date) => {
-  const agentId = String(activity?.agent_id || "");
-  const commissionPercentage = agentId ? Number(activity?.agent_commission_percentage || 0) : 0;
-  const commissionAmount = agentId
-    ? calculateEventCommission(totalAmount, commissionPercentage)
-    : 0;
-  const agent = commissionAmount > 0 ? findLocalAgent(store, agentId) : null;
-  return {
-    agent_id: agentId || null,
-    agent_commission_percentage: commissionPercentage,
-    commission_amount: commissionAmount,
-    commission_status: commissionAmount > 0 ? "UNPAID" : "PAID",
-    commission_period_key:
-      commissionAmount > 0
-        ? getCommissionPeriodKey(bookingTime, agent?.payout_frequency || "DAILY")
-        : null,
-  };
+const buildLocalActivityPayoutFields = (store: any, activity: any, totalAmount: number, bookingTime: Date) => {
+  const vendorId = String(activity?.vendor_id || "");
+  const vendor = vendorId ? findLocalVendor(store, vendorId) : null;
+  return buildVendorPayoutFields(activity, totalAmount, bookingTime, vendor);
 };
 
 const countActivityTickets = (bookings: any[]) =>
@@ -290,7 +265,7 @@ export async function POST(req: NextRequest) {
     const bookedBy = customer?.name || body.customer?.name || "Walk-in customer";
     const seatCodes = Array.from({ length: ticketCount }, () => "GENERAL");
     const totalAmount = getActivityPrice(activity) * ticketCount;
-    const commissionFields = await buildCommissionFields(activity, totalAmount, now);
+    const commissionFields = await buildActivityPayoutFields(activity, totalAmount, now);
 
     const [booking] = await Booking.insertMany([{
       booking_reference: bookingReference,
@@ -331,6 +306,12 @@ export async function POST(req: NextRequest) {
       action_url: "/admin/tickets",
       metadata: { booking_reference: bookingReference, activity_id: activityRecordId },
     });
+    await logBookingCreationServer(recordId(booking), activity.title, bookedBy, {
+      booking_reference: bookingReference,
+      ticket_count: ticketCount,
+      total_amount: totalAmount,
+      source: "website",
+    });
     return NextResponse.json({ data: { booking, tickets, remaining: remaining - ticketCount } }, { status: 201 });
   } catch (error: any) {
     const store = await readStore();
@@ -362,7 +343,7 @@ export async function POST(req: NextRequest) {
     const bookedBy = customer?.name || body.customer?.name || "Walk-in customer";
     const seatCodes = Array.from({ length: ticketCount }, () => "GENERAL");
     const totalAmount = getActivityPrice(activity) * ticketCount;
-    const commissionFields = buildLocalCommissionFields(store, activity, totalAmount, now);
+    const commissionFields = buildLocalActivityPayoutFields(store, activity, totalAmount, now);
     const booking = {
       id: `bookings-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       booking_reference: bookingReference,
@@ -409,6 +390,12 @@ export async function POST(req: NextRequest) {
       action_url: "/admin/tickets",
       metadata: { booking_reference: bookingReference, activity_id: recordId(activity) },
     }).catch(() => null);
+    await logBookingCreationServer(recordId(booking), activity.title, bookedBy, {
+      booking_reference: bookingReference,
+      ticket_count: ticketCount,
+      total_amount: totalAmount,
+      source: "website",
+    });
     return NextResponse.json({ data: { booking, tickets, remaining: remaining - ticketCount }, fallback: true }, { status: 201 });
   }
 }

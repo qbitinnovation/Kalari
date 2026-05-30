@@ -3,7 +3,9 @@ import connectDB, { getGenericModel } from '@/lib/db';
 import mongoose from 'mongoose';
 import { localQuery } from '@/lib/localStore';
 import { assignAgentIds } from '@/lib/agentId';
+import { assignVendorIds } from '@/lib/vendorId';
 import { backfillAgentPublicIds } from '@/lib/agentIdBackfill';
+import { backfillVendorPublicIds } from '@/lib/vendorIdBackfill';
 import { countBookedSeats, getAvailabilityStatus, getRecordId, getShowCapacity, isShowBookableAt } from '@/lib/booking';
 import {
   syncAllActivitiesInMongo,
@@ -165,6 +167,10 @@ export async function POST(req: NextRequest) {
       await backfillAgentPublicIds();
     }
 
+    if (collection === "vendors" && operation === "select") {
+      await backfillVendorPublicIds();
+    }
+
     if (operation === "select") {
       if (collection === "shows") {
         const Show = getGenericModel("shows") as any;
@@ -195,6 +201,10 @@ export async function POST(req: NextRequest) {
       if (collection === "agents") {
         const existingAgents = await Model.find({}).select("agent_code").lean();
         rows = assignAgentIds(existingAgents, rows);
+      }
+      if (collection === "vendors") {
+        const existingVendors = await Model.find({}).select("vendor_code").lean();
+        rows = assignVendorIds(existingVendors, rows);
       }
       const docs = await Model.insertMany(rows);
       return NextResponse.json({ data: docs });

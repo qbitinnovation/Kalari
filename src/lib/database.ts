@@ -156,6 +156,8 @@ export interface Show {
   type?: 'KALARI';
   capacity?: number;
   layout_id?: string;
+  agent_id?: string;
+  agent_commission_percentage?: number;
   active: boolean;
   status?: "ACTIVE" | "HOUSE_FULL" | "SHOW_STARTED" | "SHOW_DONE";
   booked_count?: number;
@@ -186,6 +188,24 @@ export interface Agent {
   updated_at?: string;
   full_name?: string;
   commission_percentage?: number;
+}
+
+export interface Vendor {
+  id: string;
+  _id?: string;
+  vendor_code?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  bank_account_name?: string;
+  bank_account_number?: string;
+  bank_ifsc?: string;
+  bank_name?: string;
+  payout_method?: "BANK" | "GPAY";
+  gpay_phone?: string;
+  active: boolean;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface Seat {
@@ -225,8 +245,8 @@ export interface Activity {
   booking_price?: number;
   daily_capacity?: number;
   booking_status?: "ACTIVE" | "PAUSED";
-  agent_id?: string;
-  agent_commission_percentage?: number;
+  vendor_id?: string;
+  platform_commission_percentage?: number;
   rating?: number;
   review_count?: number;
   image?: string;
@@ -257,6 +277,14 @@ export interface Booking {
   commission_period_key?: string;
   commission_paid_at?: string;
   commission_paid_by?: string;
+  vendor_id?: string;
+  platform_commission_percentage?: number;
+  platform_commission_amount?: number;
+  vendor_payout_amount?: number;
+  vendor_payout_status?: "UNPAID" | "PAID";
+  vendor_payout_period_key?: string;
+  vendor_payout_paid_at?: string;
+  vendor_payout_paid_by?: string;
   payment_method?: string;
   payment_status?: "PAID" | "COD_PENDING" | "PAYMENT_PENDING" | "FAILED" | "REFUNDED";
   payment_id?: string;
@@ -273,6 +301,10 @@ export interface Booking {
   cancellation_status?: "NONE" | "PENDING" | "APPROVED" | "REJECTED";
   cancellation_reviewed_at?: string;
   cancellation_reviewed_by?: string;
+  commission_clawback_required?: boolean;
+  vendor_payout_clawback_required?: boolean;
+  commission_amount_at_cancel?: number;
+  vendor_payout_amount_at_cancel?: number;
   customer?: Customer;
   show?: Show;
   activity?: Activity;

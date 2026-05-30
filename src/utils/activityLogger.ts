@@ -1,5 +1,7 @@
 import { db } from '@/lib/database'
 
+export { normalizeActivityLog } from '@/utils/activityLogNormalize'
+
 export interface LogActivityParams {
   action: string
   entityType: string
@@ -9,9 +11,10 @@ export interface LogActivityParams {
   performedBy: string
   ipAddress?: string
   userAgent?: string
+  performedAt?: string
 }
 
-export const logActivity = async ({
+export const buildActivityLogRow = ({
   action,
   entityType,
   entityId,
@@ -19,21 +22,25 @@ export const logActivity = async ({
   details,
   performedBy,
   ipAddress,
-  userAgent
-}: LogActivityParams): Promise<string | null> => {
+  userAgent,
+  performedAt,
+}: LogActivityParams) => ({
+  action: action.toUpperCase(),
+  entity_type: entityType.toUpperCase(),
+  entity_id: entityId || null,
+  entity_name: entityName || null,
+  details: details || null,
+  performed_by: performedBy,
+  ip_address: ipAddress || null,
+  user_agent: userAgent || null,
+  performed_at: performedAt || new Date().toISOString(),
+})
+
+export const logActivity = async (params: LogActivityParams): Promise<string | null> => {
   try {
     const { data, error } = await db
       .from('activity_logs')
-      .insert({
-        action: action.toUpperCase(),
-        entity_type: entityType.toUpperCase(),
-        entity_id: entityId || null,
-        entity_name: entityName || null,
-        details: details || null,
-        performed_by: performedBy,
-        ip_address: ipAddress || null,
-        user_agent: userAgent || null
-      })
+      .insert(buildActivityLogRow(params))
 
     if (error) {
       console.error('Error logging activity:', error)
@@ -47,7 +54,6 @@ export const logActivity = async ({
   }
 }
 
-// Convenience functions for common actions
 export const logShowCreation = async (showId: string, showTitle: string, performedBy: string, details?: any) => {
   return logActivity({
     action: 'CREATE',
@@ -78,6 +84,138 @@ export const logShowDeletion = async (showId: string, showTitle: string, perform
     entityName: showTitle,
     details,
     performedBy
+  })
+}
+
+export const logActivityCatalogCreation = async (activityId: string, title: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'CREATE',
+    entityType: 'ACTIVITY',
+    entityId: activityId,
+    entityName: title,
+    details,
+    performedBy,
+  })
+}
+
+export const logActivityCatalogUpdate = async (activityId: string, title: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'UPDATE',
+    entityType: 'ACTIVITY',
+    entityId: activityId,
+    entityName: title,
+    details,
+    performedBy,
+  })
+}
+
+export const logActivityCatalogDeletion = async (activityId: string, title: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'DELETE',
+    entityType: 'ACTIVITY',
+    entityId: activityId,
+    entityName: title,
+    details,
+    performedBy,
+  })
+}
+
+export const logAgentCreation = async (agentId: string, agentName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'CREATE',
+    entityType: 'AGENT',
+    entityId: agentId,
+    entityName: agentName,
+    details,
+    performedBy,
+  })
+}
+
+export const logAgentUpdate = async (agentId: string, agentName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'UPDATE',
+    entityType: 'AGENT',
+    entityId: agentId,
+    entityName: agentName,
+    details,
+    performedBy,
+  })
+}
+
+export const logAgentDeletion = async (agentId: string, agentName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'DELETE',
+    entityType: 'AGENT',
+    entityId: agentId,
+    entityName: agentName,
+    details,
+    performedBy,
+  })
+}
+
+export const logVendorCreation = async (vendorId: string, vendorName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'CREATE',
+    entityType: 'VENDOR',
+    entityId: vendorId,
+    entityName: vendorName,
+    details,
+    performedBy,
+  })
+}
+
+export const logVendorUpdate = async (vendorId: string, vendorName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'UPDATE',
+    entityType: 'VENDOR',
+    entityId: vendorId,
+    entityName: vendorName,
+    details,
+    performedBy,
+  })
+}
+
+export const logVendorDeletion = async (vendorId: string, vendorName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'DELETE',
+    entityType: 'VENDOR',
+    entityId: vendorId,
+    entityName: vendorName,
+    details,
+    performedBy,
+  })
+}
+
+export const logCustomerCreation = async (customerId: string, customerName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'CREATE',
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    entityName: customerName,
+    details,
+    performedBy,
+  })
+}
+
+export const logCustomerUpdate = async (customerId: string, customerName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'UPDATE',
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    entityName: customerName,
+    details,
+    performedBy,
+  })
+}
+
+export const logCustomerDeletion = async (customerId: string, customerName: string, performedBy: string, details?: any) => {
+  return logActivity({
+    action: 'DELETE',
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    entityName: customerName,
+    details,
+    performedBy,
   })
 }
 

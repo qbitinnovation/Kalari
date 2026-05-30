@@ -10,7 +10,19 @@ import { AdminTable, AdminTableBody, AdminTableCell, AdminTableEmpty, AdminTable
 import { formatDisplayDateValue } from "@/components/ui/date-utils";
 import { escapeReportHtml, openAdminReportPdf } from "@/lib/adminReportTemplate";
 import { getBookingReference, getRecordId, parseSeatCodes } from "@/lib/booking";
-import { getAgentContact, getAgentDisplayName, getAgentAlertMethod, getAgentPayoutDetailRows, getAgentGpayPhone, inferAgentPayoutMethod, normalizeAgentNotificationMethod, normalizePayoutFrequency } from "@/lib/agentCommission";
+import {
+  getAgentContact,
+  getAgentDisplayName,
+  getAgentAlertMethod,
+  getAgentGpayPhone,
+  getAgentPayoutDetailRows,
+  getBookingCommissionDisplayStatus,
+  inferAgentPayoutMethod,
+  isBookingCommissionDue,
+  isShowBooking,
+  normalizeAgentNotificationMethod,
+  normalizePayoutFrequency,
+} from "@/lib/agentCommission";
 import { getAgentCode, getAgentPublicId } from "@/lib/agentId";
 import { toDisplayTitle } from "@/lib/textFormat";
 
@@ -41,6 +53,8 @@ export default function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [markingPaid, setMarkingPaid] = useState(false);
   const [showPayConfirm, setShowPayConfirm] = useState(false);
+  const [showSettleAllConfirm, setShowSettleAllConfirm] = useState(false);
+  const [settlingAllDue, setSettlingAllDue] = useState(false);
   const [showAllStatuses, setShowAllStatuses] = useState(false);
   const [error, setError] = useState("");
 
@@ -98,10 +112,17 @@ export default function AgentDetailPage() {
         ]);
         return { ...booking, show_details: showResult.data || undefined, activity_details: activityResult.data || undefined };
       }));
-      const visibleRows = filterRows(rows);
-      setBookings(rows);
-      if (!silent) {
-        setSelectedIds(visibleRows.filter(isUnpaidCommission).map(getRecordId));
+      const showRows = rows.filter(isShowBooking);
+      const visibleRows = filterRows(showRows);
+      setBookings(showRows);
+      if (!silent && agentData) {
+        setSelectedIds(
+          showRows
+            .filter((booking) =>
+              isBookingCommissionDue(booking, agentData, new Date(), booking.show_details),
+            )
+            .map(getRecordId),
+        );
       }
     } catch (error: any) {
       setError(error.message || "Failed to load agent details.");
@@ -110,13 +131,24 @@ export default function AgentDetailPage() {
     }
   };
 
-  const isUnpaidCommission = (booking: BookingWithDetails) =>
-    booking.status === "CONFIRMED" && Number(booking.commission_amount || 0) > 0 && booking.commission_status !== "PAID";
+  const getCommissionRowStatus = (booking: BookingWithDetails) =>
+    agent ? getBookingCommissionDisplayStatus(booking, agent, booking.show_details) : "NONE";
+
+  const isUnpaidCommission = (booking: BookingWithDetails) => {
+    const rowStatus = getCommissionRowStatus(booking);
+    return rowStatus === "DUE" || rowStatus === "PENDING";
+  };
+
+  const isDueCommission = (booking: BookingWithDetails) =>
+    agent ? isBookingCommissionDue(booking, agent, new Date(), booking.show_details) : false;
 
   const filterRows = (rows: BookingWithDetails[]) => rows.filter((booking) => {
     if (periodFilter && booking.commission_period_key !== periodFilter) return false;
-    if (effectiveStatusFilter === "UNPAID" || effectiveStatusFilter === "DUE") return isUnpaidCommission(booking);
-    if (effectiveStatusFilter === "PAID") return booking.commission_status === "PAID";
+    const rowStatus = getCommissionRowStatus(booking);
+    if (effectiveStatusFilter === "DUE") return rowStatus === "DUE";
+    if (effectiveStatusFilter === "PENDING") return rowStatus === "PENDING";
+    if (effectiveStatusFilter === "UNPAID") return isUnpaidCommission(booking);
+    if (effectiveStatusFilter === "PAID") return rowStatus === "PAID";
     return true;
   });
 
@@ -128,8 +160,67 @@ export default function AgentDetailPage() {
     return { unpaid, paid, all: unpaid + paid };
   }, [visibleBookings]);
 
-  const selectedUnpaid = visibleBookings.filter((booking) => selectedIds.includes(getRecordId(booking)) && isUnpaidCommission(booking));
+  const selectedUnpaid = visibleBookings.filter(
+    (booking) => selectedIds.includes(getRecordId(booking)) && isDueCommission(booking),
+  );
   const selectedAmount = selectedUnpaid.reduce((sum, booking) => sum + Number(booking.commission_amount || 0), 0);
+
+  const dueBookings = useMemo(
+    () =>
+      agent
+        ? bookings.filter((booking) => isBookingCommissionDue(booking, agent, new Date(), booking.show_details))
+        : [],
+    [agent, bookings],
+  );
+  const dueAmount = dueBookings.reduce((sum, booking) => sum + Number(booking.commission_amount || 0), 0);
+
+  const applyPaidBookings = (paidIds: Set<string>, paidAt: string, paidBy: string) => {
+    setBookings((current) =>
+      current.map((booking) =>
+        paidIds.has(getRecordId(booking))
+          ? { ...booking, commission_status: "PAID", commission_paid_at: paidAt, commission_paid_by: paidBy, updated_at: paidAt }
+          : booking,
+      ),
+    );
+    setSelectedIds((ids) => ids.filter((id) => !paidIds.has(id)));
+  };
+
+  const settleAllDueForAgent = async () => {
+    if (!agent || dueBookings.length === 0) return;
+    setSettlingAllDue(true);
+    setError("");
+    try {
+      const { data: auth } = await db.auth.getUser();
+      const paidBy = auth.user?.id || auth.user?.email || "admin";
+      const response = await fetch("/api/commissions/settle-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId, paidBy }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not settle due commissions for this agent.");
+      }
+
+      const paidIds = new Set<string>((payload.data?.bookingIds || dueBookings.map(getRecordId)).map(String));
+      const paidAt = payload.data?.paidAt || new Date().toISOString();
+      const paidByUser = payload.data?.paidBy || paidBy;
+      applyPaidBookings(paidIds, paidAt, paidByUser);
+      setShowSettleAllConfirm(false);
+
+      if (statusFilter === "UNPAID" || statusFilter === "DUE") {
+        setShowAllStatuses(true);
+        const params = new URLSearchParams();
+        if (periodFilter) params.set("periodKey", periodFilter);
+        const query = params.toString();
+        router.replace(query ? `/admin/agents/${agentId}?${query}` : `/admin/agents/${agentId}`);
+      }
+    } catch (error: any) {
+      setError(error.message || "Could not settle due commissions for this agent.");
+    } finally {
+      setSettlingAllDue(false);
+    }
+  };
 
   const toggleSelection = (bookingId: string) => {
     setSelectedIds((current) => current.includes(bookingId) ? current.filter((id) => id !== bookingId) : [...current, bookingId]);
@@ -143,29 +234,23 @@ export default function AgentDetailPage() {
     const amountToPay = selectedAmount;
     try {
       const { data: auth } = await db.auth.getUser();
-      const now = new Date().toISOString();
       const paidBy = auth.user?.id || auth.user?.email || "admin";
-      for (const booking of selectedUnpaid) {
-        const { data, error } = await db.from("bookings").update({
-          commission_status: "PAID",
-          commission_paid_at: now,
-          commission_paid_by: paidBy,
-          updated_at: now,
-        }).eq("id", getRecordId(booking));
-        if (error) throw error;
-        if (Number(data?.modifiedCount ?? 1) === 0) {
-          throw new Error(`Could not update booking ${getBookingReference(booking)}.`);
-        }
+      const response = await fetch("/api/commissions/mark-bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingIds: selectedUnpaid.map(getRecordId),
+          paidBy,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not mark commission paid.");
       }
 
-      setBookings((current) =>
-        current.map((booking) =>
-          paidIds.has(getRecordId(booking))
-            ? { ...booking, commission_status: "PAID", commission_paid_at: now, commission_paid_by: paidBy, updated_at: now }
-            : booking
-        )
-      );
-      setSelectedIds((ids) => ids.filter((id) => !paidIds.has(id)));
+      const paidAt = payload.data?.paidAt || new Date().toISOString();
+      const paidByUser = payload.data?.paidBy || paidBy;
+      applyPaidBookings(paidIds, paidAt, paidByUser);
       setShowPayConfirm(false);
 
       if (statusFilter === "UNPAID" || statusFilter === "DUE") {
@@ -284,7 +369,17 @@ export default function AgentDetailPage() {
           <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
             {(periodFilter || statusFilter) && <Button variant="secondary" onClick={() => router.push(`/admin/agents/${agentId}`)}>Clear Filter</Button>}
             <Button variant="secondary" onClick={exportAgentReport} disabled={loading || !agent}><Download className="h-4 w-4" /> Export PDF</Button>
-            <Button onClick={() => setShowPayConfirm(true)} disabled={loading || markingPaid || selectedUnpaid.length === 0}><CheckCircle2 className="h-4 w-4" /> Mark Selected Paid ({rupees(selectedAmount)})</Button>
+            {dueBookings.length > 0 && (
+              <Button
+                variant="secondary"
+                onClick={() => { setError(""); setShowSettleAllConfirm(true); }}
+                disabled={loading || settlingAllDue || markingPaid}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Settle All Due ({rupees(dueAmount)})
+              </Button>
+            )}
+            <Button onClick={() => setShowPayConfirm(true)} disabled={loading || markingPaid || settlingAllDue || selectedUnpaid.length === 0}><CheckCircle2 className="h-4 w-4" /> Mark Selected Paid ({rupees(selectedAmount)})</Button>
           </div>
         </header>
 
@@ -362,11 +457,12 @@ export default function AgentDetailPage() {
                 <AdminTableEmpty colSpan={7}>No bookings found for this agent.</AdminTableEmpty>
               ) : visibleBookings.map((booking) => {
                 const bookingId = getRecordId(booking);
-                const unpaid = isUnpaidCommission(booking);
+                const rowStatus = getCommissionRowStatus(booking);
+                const canSelect = rowStatus === "DUE";
                 return (
                   <AdminTableRow key={bookingId}>
                     <AdminTableCell>
-                      <input type="checkbox" disabled={!unpaid} checked={selectedIds.includes(bookingId)} onChange={() => toggleSelection(bookingId)} />
+                      <input type="checkbox" disabled={!canSelect} checked={selectedIds.includes(bookingId)} onChange={() => toggleSelection(bookingId)} />
                     </AdminTableCell>
                     <AdminTableCell>
                       <div className="font-bold text-sm">{getBookingEventTitle(booking)}</div>
@@ -377,8 +473,18 @@ export default function AgentDetailPage() {
                     <AdminTableCell>{booking.agent_commission_percentage || 0}%</AdminTableCell>
                     <AdminTableCell><span className="font-black text-emerald-600">{rupees(booking.commission_amount || 0)}</span></AdminTableCell>
                     <AdminTableCell>
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase ${booking.commission_status === "PAID" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                        {booking.commission_status || "UNPAID"}
+                      <span
+                        className={`rounded-full px-3 py-1 text-[10px] font-black uppercase ${
+                          rowStatus === "PAID"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : rowStatus === "DUE"
+                              ? "bg-amber-100 text-amber-800"
+                              : rowStatus === "PENDING"
+                                ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {rowStatus === "NONE" ? "—" : rowStatus}
                       </span>
                     </AdminTableCell>
                   </AdminTableRow>
@@ -387,6 +493,63 @@ export default function AgentDetailPage() {
             </AdminTableBody>
           </AdminTable>
         </AdminTablePanel>
+
+      {showSettleAllConfirm && agent && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-panel admin-modal-card">
+            <div className="admin-modal-header">
+              <div>
+                <h2 className="admin-modal-title">Settle all due commissions</h2>
+                <p className="admin-modal-subtitle">
+                  This will mark every commission currently due for {getAgentDisplayName(agent)} as paid.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettleAllConfirm(false)}
+                className="admin-modal-close"
+                aria-label="Close modal"
+                disabled={settlingAllDue}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="admin-modal-body space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <div className="flex justify-between gap-4 text-sm">
+                  <span className="font-bold opacity-60">Agent</span>
+                  <span className="min-w-0 break-words text-right font-black">{getAgentDisplayName(agent)}</span>
+                </div>
+                <div className="mt-3 flex justify-between gap-4 text-sm">
+                  <span className="font-bold opacity-60">Payout via</span>
+                  <span className="min-w-0 break-words text-right font-black">
+                    {inferAgentPayoutMethod(agent) === "GPAY"
+                      ? `GPay • ${getAgentGpayPhone(agent) || "Not added"}`
+                      : agent.bank_name || "Bank transfer"}
+                  </span>
+                </div>
+                <div className="mt-3 flex justify-between gap-4 text-sm">
+                  <span className="font-bold opacity-60">Due bookings</span>
+                  <span className="font-black">{dueBookings.length}</span>
+                </div>
+                <div className="mt-3 flex justify-between gap-4 text-sm">
+                  <span className="font-bold opacity-60">Total payout</span>
+                  <span className="font-black text-emerald-600">{rupees(dueAmount)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="admin-modal-footer">
+              <Button type="button" variant="secondary" onClick={() => setShowSettleAllConfirm(false)} disabled={settlingAllDue}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={settleAllDueForAgent} disabled={settlingAllDue}>
+                <CheckCircle2 className="h-4 w-4" />
+                {settlingAllDue ? "Processing..." : "Confirm settle all due"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPayConfirm && agent && (
         <div className="admin-modal-overlay">

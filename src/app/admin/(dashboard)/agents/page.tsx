@@ -5,6 +5,12 @@ import Link from "next/link";
 import { AlertTriangle, Banknote, Eye, MessageSquare, Pencil, Plus, Smartphone, Trash2, X } from "lucide-react";
 import { db, type Agent } from "@/lib/database";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  logAgentCreation,
+  logAgentDeletion,
+  logAgentUpdate,
+} from "@/utils/activityLogger";
 import { AdminTable, AdminTableBody, AdminTableCell, AdminTableEmpty, AdminTableHead, AdminTableHeaderCell, AdminTablePanel, AdminTableRow, AdminTableSkeleton, Button, IndianPhoneField, Input, SearchInput, Select } from "@/components/ui";
 import { formatDisplayDateValue } from "@/components/ui/date-utils";
 import {
@@ -112,6 +118,7 @@ export default function AgentsPage() {
   const [payoutSubmitted, setPayoutSubmitted] = useState(false);
   const [error, setError] = useState("");
   const darkMode = useDarkMode();
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchAgents();
@@ -211,12 +218,19 @@ export default function AgentsPage() {
         throw new Error("Fill in all bank details for bank transfer payout.");
       }
 
+      const performedBy = user?.email || user?.full_name || "admin";
+
       if (editingAgent) {
-        const { error } = await db.from("agents").update(payload).eq("id", recordId(editingAgent));
+        const agentId = recordId(editingAgent);
+        const { error } = await db.from("agents").update(payload).eq("id", agentId);
         if (error) throw error;
+        await logAgentUpdate(agentId, payload.name, performedBy);
       } else {
-        const { error } = await db.from("agents").insert([{ ...payload, active: true, created_at: now }]);
+        const { data, error } = await db.from("agents").insert([{ ...payload, active: true, created_at: now }]);
         if (error) throw error;
+        const created = (data as any)?.[0];
+        const agentId = String(created?.id || created?._id || "");
+        await logAgentCreation(agentId, payload.name, performedBy);
       }
 
       setShowForm(false);
@@ -231,16 +245,18 @@ export default function AgentsPage() {
     }
   };
 
-  const toggleAgent = async (agent: Agent) => {
-    const { error } = await db.from("agents").update({ active: agent.active === false, updated_at: new Date().toISOString() }).eq("id", recordId(agent));
-    if (error) setError(error.message || "Could not update agent status.");
-    await fetchAgents();
-  };
-
   const deleteAgent = async (agent: Agent) => {
     if (!window.confirm(`Delete ${getAgentDisplayName(agent)}? Existing booking commission history will remain.`)) return;
-    const { error } = await db.from("agents").delete().eq("id", recordId(agent));
+    const agentId = recordId(agent);
+    const { error } = await db.from("agents").delete().eq("id", agentId);
     if (error) setError(error.message || "Could not delete agent.");
+    else {
+      await logAgentDeletion(
+        agentId,
+        getAgentDisplayName(agent),
+        user?.email || user?.full_name || "admin",
+      );
+    }
     await fetchAgents();
   };
 
@@ -437,16 +453,15 @@ export default function AgentsPage() {
               <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Payout</AdminTableHeaderCell>
               <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Notify</AdminTableHeaderCell>
               <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Payout</AdminTableHeaderCell>
-              <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Status</AdminTableHeaderCell>
               <AdminTableHeaderCell className="text-[10px] font-black uppercase tracking-widest opacity-40">Created</AdminTableHeaderCell>
               <AdminTableHeaderCell align="right" className="text-[10px] font-black uppercase tracking-widest opacity-40">Actions</AdminTableHeaderCell>
             </tr>
           </AdminTableHead>
           <AdminTableBody>
             {loading ? (
-              <AdminTableSkeleton columns={7} leadColumn="avatar" />
+              <AdminTableSkeleton columns={6} leadColumn="avatar" />
             ) : filteredAgents.length === 0 ? (
-              <AdminTableEmpty colSpan={7}>No agents found.</AdminTableEmpty>
+              <AdminTableEmpty colSpan={6}>No agents found.</AdminTableEmpty>
             ) : (
               filteredAgents.map((agent) => (
               <AdminTableRow key={recordId(agent)}>
@@ -480,11 +495,6 @@ export default function AgentsPage() {
                     {inferAgentPayoutMethod(agent) === "BANK" && agent.bank_account_number && (
                       <div className="mt-1 text-xs opacity-50">•••• {agent.bank_account_number.slice(-4)}</div>
                     )}
-                </AdminTableCell>
-                <AdminTableCell>
-                    <button onClick={() => toggleAgent(agent)} className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${agent.active !== false ? "border-emerald-200 bg-emerald-100 text-emerald-700" : "border-red-200 bg-red-100 text-red-700"}`}>
-                      {agent.active !== false ? "Active" : "Inactive"}
-                    </button>
                 </AdminTableCell>
                 <AdminTableCell className="text-xs font-bold opacity-50">{formatDisplayDateValue(agent.created_at)}</AdminTableCell>
                 <AdminTableCell align="right">

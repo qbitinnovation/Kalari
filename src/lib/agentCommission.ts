@@ -1,4 +1,10 @@
 import { getAgentCode } from "@/lib/agentId";
+import {
+  buildShowLookupMap,
+  isBookingCustomerPaid,
+  isBookingSettleable,
+} from "@/lib/bookingPayoutLifecycle";
+import { isShowCompleted } from "@/lib/catalogLifecycle";
 import { getRecordId } from "@/lib/booking";
 
 export type PayoutFrequency = "DAILY" | "WEEKLY" | "MONTHLY";
@@ -153,18 +159,48 @@ export type DueCommissionBookingsResult = {
   };
 };
 
-export const isBookingCommissionDue = (booking: unknown, agent: unknown, today = new Date()) => {
+export type BookingCommissionDisplayStatus = "PAID" | "DUE" | "PENDING" | "NONE";
+
+export const getBookingCommissionDisplayStatus = (
+  booking: unknown,
+  agent: unknown,
+  show: unknown,
+  today = new Date(),
+): BookingCommissionDisplayStatus => {
+  const row = booking as { commission_status?: unknown; commission_amount?: unknown; status?: unknown };
+  if (Number(row?.commission_amount || 0) <= 0) return "NONE";
+  if (row?.commission_status === "PAID") return "PAID";
+  if (String(row?.status || "") !== "CONFIRMED") return "NONE";
+  if (isBookingCommissionDue(booking, agent, today, show)) return "DUE";
+  return "PENDING";
+};
+
+export const isBookingCommissionEligible = (
+  booking: unknown,
+  show: unknown,
+  today = new Date(),
+) => {
+  const row = booking as { commission_status?: unknown; commission_amount?: unknown };
+  if (!isBookingSettleable(booking)) return false;
+  if (row?.commission_status === "PAID") return false;
+  if (Number(row?.commission_amount || 0) <= 0) return false;
+  if (!isBookingCustomerPaid(booking)) return false;
+  if (!show || !isShowCompleted(show, today)) return false;
+  return true;
+};
+
+export const isBookingCommissionDue = (
+  booking: unknown,
+  agent: unknown,
+  today = new Date(),
+  show?: unknown,
+) => {
   const row = booking as {
-    status?: unknown;
-    commission_status?: unknown;
-    commission_amount?: unknown;
     commission_period_key?: unknown;
   };
   const agentRecord = agent as { active?: unknown; payout_frequency?: unknown };
   if (agentRecord?.active === false) return false;
-  if (String(row?.status || "") !== "CONFIRMED") return false;
-  if (row?.commission_status === "PAID") return false;
-  if (Number(row?.commission_amount || 0) <= 0) return false;
+  if (!isBookingCommissionEligible(booking, show, today)) return false;
   const periodKey = String(row?.commission_period_key || "");
   if (!periodKey) return false;
   const dueKeys = getDueCommissionPeriodKeys(agentRecord?.payout_frequency, today);
@@ -174,18 +210,22 @@ export const isBookingCommissionDue = (booking: unknown, agent: unknown, today =
 export const collectDueCommissionBookings = (
   agents: any[],
   bookings: any[],
-  today = new Date()
+  today = new Date(),
+  shows: any[] = [],
 ): DueCommissionBookingsResult => {
+  const showBookings = filterShowCommissionBookings(bookings);
   const agentById = buildAgentLookupMap(agents.filter((agent) => agent.active !== false));
+  const showById = buildShowLookupMap(shows);
   const dueBookings: any[] = [];
   const periodKeys = new Set<string>();
   const agentIds = new Set<string>();
   const byAgentMap = new Map<string, DueAgentBreakdown>();
 
-  bookings.forEach((booking) => {
+  showBookings.forEach((booking) => {
     const agentId = String(booking.agent_id || "");
     const agent = findAgentByReference(agentById, agentId);
-    if (!agent || !isBookingCommissionDue(booking, agent, today)) return;
+    const show = showById.get(String(booking.show_id || "")) || null;
+    if (!agent || !isBookingCommissionDue(booking, agent, today, show)) return;
 
     dueBookings.push(booking);
     periodKeys.add(String(booking.commission_period_key || ""));
@@ -230,6 +270,183 @@ export const collectDueCommissionBookings = (
   };
 };
 
+export type CommissionGroupStatus = "DUE" | "PENDING" | "PAID";
+
+export type CommissionGroupSummary = {
+  key: string;
+  agentId: string;
+  periodKey: string;
+  status: CommissionGroupStatus;
+  amount: number;
+  bookingCount: number;
+};
+
+export type CommissionTotalsSummary = {
+  due: number;
+  pending: number;
+  paid: number;
+  dueAgentCount: number;
+  dueBookingCount: number;
+  dueByAgent: DueAgentBreakdown[];
+  groups: CommissionGroupSummary[];
+};
+
+export const buildCommissionGroups = (
+  agents: any[],
+  bookings: any[],
+  today = new Date(),
+  shows: any[] = [],
+): CommissionGroupSummary[] => {
+  const showBookings = filterShowCommissionBookings(bookings);
+  const agentById = buildAgentLookupMap(agents);
+  const showById = buildShowLookupMap(shows);
+  const grouped = new Map<string, any[]>();
+
+  showBookings.forEach((booking) => {
+    const agentId = String(booking.agent_id || "");
+    const periodKey = String(booking.commission_period_key || "unassigned");
+    if (!agentId) return;
+    const key = `${agentId}:${periodKey}:${booking.commission_status === "PAID" ? "PAID" : "UNPAID"}`;
+    grouped.set(key, [...(grouped.get(key) || []), booking]);
+  });
+
+  return Array.from(grouped.entries()).map(([key, rows]) => {
+    const first = rows[0];
+    const agentId = String(first.agent_id || "");
+    const agent = findAgentByReference(agentById, agentId);
+    const routeAgentId = agent ? getRecordId(agent) : agentId;
+    const periodKey = String(first.commission_period_key || "unassigned");
+    const paid = rows.every((booking) => booking.commission_status === "PAID");
+    const status: CommissionGroupStatus = paid
+      ? "PAID"
+      : rows.some((booking) =>
+          isBookingCommissionDue(
+            booking,
+            agent,
+            today,
+            showById.get(String(booking.show_id || "")) || null,
+          ),
+        )
+        ? "DUE"
+        : "PENDING";
+
+    return {
+      key,
+      agentId: routeAgentId,
+      periodKey,
+      status,
+      amount: rows.reduce((sum, booking) => sum + Number(booking.commission_amount || 0), 0),
+      bookingCount: rows.length,
+    };
+  });
+};
+
+export const summarizeCommissionTotals = (
+  agents: any[],
+  bookings: any[],
+  today = new Date(),
+  shows: any[] = [],
+): CommissionTotalsSummary => {
+  const dueCommission = collectDueCommissionBookings(agents, bookings, today, shows);
+  const groups = buildCommissionGroups(agents, bookings, today, shows);
+
+  return {
+    due: dueCommission.summary.totalAmount,
+    pending: groups
+      .filter((group) => group.status === "PENDING")
+      .reduce((sum, group) => sum + group.amount, 0),
+    paid: groups
+      .filter((group) => group.status === "PAID")
+      .reduce((sum, group) => sum + group.amount, 0),
+    dueAgentCount: dueCommission.summary.agentCount,
+    dueBookingCount: dueCommission.summary.bookingCount,
+    dueByAgent: dueCommission.summary.byAgent,
+    groups,
+  };
+};
+
+export type CommissionRangeSummary = {
+  earned: number;
+  paid: number;
+  unpaid: number;
+  agentCount: number;
+  bookingCount: number;
+  byAgent: DueAgentBreakdown[];
+};
+
+const isBookingInDateRange = (booking: any, start: Date, end: Date) => {
+  const raw = String(booking?.booking_time || booking?.created_at || "");
+  if (!raw) return false;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return false;
+  return date >= start && date <= end;
+};
+
+export const summarizeCommissionTotalsForRange = (
+  agents: any[],
+  bookings: any[],
+  start: Date,
+  end: Date,
+): CommissionRangeSummary => {
+  const agentById = buildAgentLookupMap(agents.filter((agent) => agent.active !== false));
+  const inRange = filterShowCommissionBookings(bookings).filter(
+    (booking) =>
+      Number(booking.commission_amount || 0) > 0 &&
+      String(booking.status || "") === "CONFIRMED" &&
+      isBookingInDateRange(booking, start, end),
+  );
+
+  let earned = 0;
+  let paid = 0;
+  let unpaid = 0;
+  const byAgentMap = new Map<string, DueAgentBreakdown>();
+
+  inRange.forEach((booking) => {
+    const amount = Number(booking.commission_amount || 0);
+    earned += amount;
+    const isPaid = booking.commission_status === "PAID";
+    if (isPaid) {
+      paid += amount;
+      return;
+    }
+
+    unpaid += amount;
+    const agentId = String(booking.agent_id || "");
+    const agent = findAgentByReference(agentById, agentId);
+    if (!agent) return;
+    const routeAgentId = getRecordId(agent);
+
+    const existing = byAgentMap.get(routeAgentId);
+    if (existing) {
+      existing.bookingCount += 1;
+      existing.amount += amount;
+      return;
+    }
+    byAgentMap.set(routeAgentId, {
+      agentId: routeAgentId,
+      agent,
+      agentName: getAgentDisplayName(agent),
+      payoutLabel: getAgentPayoutLabel(agent),
+      periodKeys: [String(booking.commission_period_key || "")],
+      bookingCount: 1,
+      amount,
+    });
+  });
+
+  const byAgent = Array.from(byAgentMap.values()).sort((left, right) =>
+    right.amount - left.amount || left.agentName.localeCompare(right.agentName),
+  );
+
+  return {
+    earned,
+    paid,
+    unpaid,
+    agentCount: byAgent.length,
+    bookingCount: inRange.filter((booking) => booking.commission_status !== "PAID").length,
+    byAgent,
+  };
+};
+
 export const getAgentDisplayName = (agent: any) =>
   String(agent?.name || agent?.full_name || "Unnamed Agent");
 
@@ -258,3 +475,42 @@ export const getAgentContact = (agent: any) =>
 
 export const calculateEventCommission = (amount: number, percentage: unknown) =>
   (Number(amount || 0) * Number(percentage || 0)) / 100;
+
+export const isShowBooking = (booking: unknown) => {
+  const row = booking as { booking_type?: unknown; show_id?: unknown; activity_id?: unknown };
+  if (String(row?.booking_type || "").toUpperCase() === "SHOW") return true;
+  return Boolean(row?.show_id && !row?.activity_id);
+};
+
+export const filterShowCommissionBookings = (bookings: any[]) =>
+  bookings.filter(isShowBooking);
+
+export const buildShowAgentCommissionFields = (
+  show: any,
+  totalAmount: number,
+  bookingTime: Date,
+  agent?: any,
+) => {
+  const agentId = String(show?.agent_id || "");
+  const commissionPercentage = agentId ? Number(show?.agent_commission_percentage || 0) : 0;
+  const commissionAmount = agentId
+    ? calculateEventCommission(totalAmount, commissionPercentage)
+    : 0;
+
+  return {
+    agent_id: agentId || null,
+    agent_commission_percentage: commissionPercentage,
+    commission_amount: commissionAmount,
+    commission_status: commissionAmount > 0 ? ("UNPAID" as const) : ("PAID" as const),
+    commission_period_key:
+      commissionAmount > 0
+        ? getCommissionPeriodKey(bookingTime, agent?.payout_frequency || "DAILY")
+        : null,
+    vendor_id: null,
+    platform_commission_percentage: 0,
+    platform_commission_amount: 0,
+    vendor_payout_amount: 0,
+    vendor_payout_status: "PAID" as const,
+    vendor_payout_period_key: null,
+  };
+};

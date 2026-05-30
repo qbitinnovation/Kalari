@@ -1,13 +1,17 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
-import { db, type Agent } from "@/lib/database";
+import { db, type Vendor } from "@/lib/database";
 import { activityImages } from "@/lib/seedData";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { getAgentContact, getAgentDisplayName } from "@/lib/agentCommission";
+import {
+  calculatePlatformAndVendorAmounts,
+  getVendorContact,
+  getVendorDisplayName,
+} from "@/lib/vendorPayout";
 import { canBookActivity, getAdminBookingUrl } from "@/lib/adminBooking";
 import {
   activityDisplayStatusLabels,
@@ -15,6 +19,7 @@ import {
   formatAdminActivityDates,
   getActivityDisplayStatus,
 } from "@/lib/activityAvailability";
+import { resolveActivityStatus } from "@/lib/catalogLifecycle";
 import {
   AdminTable,
   AdminTableBody,
@@ -48,8 +53,8 @@ type Activity = {
   booking_price?: number;
   daily_capacity?: number;
   booking_status?: "ACTIVE" | "PAUSED";
-  agent_id?: string;
-  agent_commission_percentage?: number;
+  vendor_id?: string;
+  platform_commission_percentage?: number;
   rating: number;
   review_count: number;
   image: string;
@@ -73,8 +78,8 @@ const blankForm = {
   price: "999",
   daily_capacity: "20",
   booking_status: "ACTIVE" as "ACTIVE" | "PAUSED",
-  agent_id: "",
-  agent_commission_percentage: "",
+  vendor_id: "",
+  platform_commission_percentage: "",
   rating: "4.7",
   review_count: "0",
   image: activityImages.kalari,
@@ -112,17 +117,29 @@ export default function AdminActivitiesPage() {
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Activity | null>(null);
   const [form, setForm] = useState(blankForm);
   const [commissionError, setCommissionError] = useState("");
   const [dateError, setDateError] = useState("");
+  const [listFilter, setListFilter] = useState<"active" | "completed" | "all">("active");
+
+  const payoutPreview = useMemo(() => {
+    if (!form.vendor_id) return null;
+    const total = Number(form.price || 0);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    try {
+      return calculatePlatformAndVendorAmounts(total, form.platform_commission_percentage);
+    } catch {
+      return null;
+    }
+  }, [form.vendor_id, form.price, form.platform_commission_percentage]);
 
   useEffect(() => {
     fetchActivities();
-    fetchAgents();
+    fetchVendors();
   }, []);
 
   useEffect(() => {
@@ -132,47 +149,51 @@ export default function AdminActivitiesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId, loading, activities]);
 
+  const syncActivityStatuses = async (rows: Activity[]) => {
+    for (const activity of rows) {
+      const nextStatus = resolveActivityStatus(activity);
+      if (nextStatus === activity.status) continue;
+      await db
+        .from("activities")
+        .update({ status: nextStatus, updated_at: new Date().toISOString() })
+        .eq("id", recordId(activity));
+      activity.status = nextStatus;
+    }
+  };
+
   const fetchActivities = async () => {
     setLoading(true);
     const { data } = await db
       .from("activities")
       .select("*")
       .order("title", { ascending: true });
-    setActivities(data || []);
+    const rows = data || [];
+    await syncActivityStatuses(rows);
+    setActivities(rows);
     setLoading(false);
   };
 
-  const fetchAgents = async () => {
+  const visibleActivities = useMemo(() => {
+    return activities.filter((activity) => {
+      const displayStatus = getActivityDisplayStatus(activity);
+      if (listFilter === "active") return displayStatus !== "COMPLETED";
+      if (listFilter === "completed") return displayStatus === "COMPLETED";
+      return true;
+    });
+  }, [activities, listFilter]);
+
+  const fetchVendors = async () => {
     try {
+      await fetch("/api/vendors/backfill", { method: "POST" }).catch(() => null);
       const { data, error } = await db
-        .from("agents")
+        .from("vendors")
         .select("*")
         .eq("active", true)
         .order("name", { ascending: true });
       if (error) throw error;
-      const legacy = await db
-        .from("users")
-        .select("*")
-        .eq("role", "agent")
-        .eq("active", true)
-        .order("full_name", { ascending: true });
-      const legacyAgents = (legacy.data || []).map((agent: any) => ({
-        ...agent,
-        name: agent.full_name,
-        phone: agent.phone || agent.email,
-        payout_frequency: "MONTHLY",
-      }));
-      const existingIds = new Set(
-        (data || []).map((agent: any) => String(agent.id || agent._id)),
-      );
-      setAgents([
-        ...(data || []),
-        ...legacyAgents.filter(
-          (agent: any) => !existingIds.has(String(agent.id || agent._id)),
-        ),
-      ]);
+      setVendors(data || []);
     } catch (error) {
-      console.error("Error fetching agents:", error);
+      console.error("Error fetching vendors:", error);
     }
   };
 
@@ -194,8 +215,8 @@ export default function AdminActivitiesPage() {
       price: String(activity.booking_price || activity.price || 0),
       daily_capacity: String(activity.daily_capacity || 20),
       booking_status: activity.booking_status || "ACTIVE",
-      agent_id: activity.agent_id || "",
-      agent_commission_percentage: String(activity.agent_commission_percentage || 0),
+      vendor_id: activity.vendor_id || "",
+      platform_commission_percentage: String(activity.platform_commission_percentage || 0),
       rating: String(activity.rating || 4.7),
       review_count: String(activity.review_count || 0),
       image: activity.image || activityImages.kalari,
@@ -220,15 +241,20 @@ export default function AdminActivitiesPage() {
     }
     setDateError("");
 
-    if (form.agent_id) {
-      const raw = String(form.agent_commission_percentage ?? "").trim();
+    if (form.booking_status === "ACTIVE" && !form.vendor_id) {
+      setCommissionError("A linked vendor is required when booking is active.");
+      return;
+    }
+
+    if (form.vendor_id) {
+      const raw = String(form.platform_commission_percentage ?? "").trim();
       const pct = Number(raw);
       if (!raw) {
-        setCommissionError("Commission percentage is required when a linked agent is selected.");
+        setCommissionError("Platform commission percentage is required when a linked vendor is selected.");
         return;
       }
       if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-        setCommissionError("Enter a valid commission percentage between 0 and 100.");
+        setCommissionError("Enter a valid platform commission percentage between 0 and 100.");
         return;
       }
     }
@@ -247,9 +273,9 @@ export default function AdminActivitiesPage() {
       booking_price: price,
       daily_capacity: Number(form.daily_capacity || 0),
       booking_status: form.booking_status,
-      agent_id: form.agent_id || null,
-      agent_commission_percentage: form.agent_id
-        ? Number(form.agent_commission_percentage || 0)
+      vendor_id: form.vendor_id || null,
+      platform_commission_percentage: form.vendor_id
+        ? Number(form.platform_commission_percentage || 0)
         : 0,
       rating: Number(form.rating),
       review_count: Number(form.review_count),
@@ -294,13 +320,26 @@ export default function AdminActivitiesPage() {
           <p
             className={`mt-1 text-sm ${darkMode ? "text-slate-400" : "text-slate-600"}`}
           >
-            Manage bookable experiences, availability dates, agents, and commission.
+            Manage bookable experiences, availability dates, vendors, and platform commission.
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-5 w-5" />
-          Add Activity
-        </Button>
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end">
+          <Select
+            label="Activity list"
+            value={listFilter}
+            onChange={(value) => setListFilter(value as "active" | "completed" | "all")}
+            options={[
+              { value: "active", label: "Upcoming & in season" },
+              { value: "completed", label: "Completed" },
+              { value: "all", label: "All activities" },
+            ]}
+            className="w-full sm:w-56"
+          />
+          <Button onClick={openCreate} className="sm:self-end">
+            <Plus className="h-5 w-5" />
+            Add Activity
+          </Button>
+        </div>
       </div>
 
       <AdminTablePanel>
@@ -319,10 +358,10 @@ export default function AdminActivitiesPage() {
           <AdminTableBody>
             {loading ? (
               <AdminTableSkeleton columns={7} leadColumn="avatar" />
-            ) : activities.length === 0 ? (
+            ) : visibleActivities.length === 0 ? (
               <AdminTableEmpty colSpan={7}>No activities found.</AdminTableEmpty>
             ) : (
-              activities.map((activity) => {
+              visibleActivities.map((activity) => {
                 const displayStatus = getActivityDisplayStatus(activity);
                 const id = recordId(activity);
                 const bookable = canBookActivity(activity);
@@ -467,45 +506,68 @@ export default function AdminActivitiesPage() {
                 <p className="text-sm font-bold text-red-600">{dateError}</p>
               ) : null}
               <Select
-                label="Linked Agent"
-                value={form.agent_id || "__none__"}
-                onChange={(agent_id) => {
-                  const linked = agent_id !== "__none__";
+                label="Linked Vendor"
+                value={form.vendor_id || "__none__"}
+                onChange={(vendor_id) => {
+                  const linked = vendor_id !== "__none__";
                   setCommissionError("");
                   setForm({
                     ...form,
-                    agent_id: linked ? agent_id : "",
-                    agent_commission_percentage: linked ? form.agent_commission_percentage : "",
+                    vendor_id: linked ? vendor_id : "",
+                    platform_commission_percentage: linked ? form.platform_commission_percentage : "",
                   });
                 }}
-                placeholder="No linked agent"
+                placeholder="No linked vendor"
                 options={[
-                  { value: "__none__", label: "No linked agent" },
-                  ...agents.map((agent) => ({
-                    value: String(agent.id || agent._id),
-                    label: `${getAgentDisplayName(agent)}${getAgentContact(agent) ? ` (${getAgentContact(agent)})` : ""}`,
+                  { value: "__none__", label: "No linked vendor" },
+                  ...vendors.map((vendor) => ({
+                    value: String(vendor.id || vendor._id),
+                    label: `${getVendorDisplayName(vendor)}${getVendorContact(vendor) ? ` (${getVendorContact(vendor)})` : ""}`,
                   })),
                 ]}
-                searchable={agents.length > 3}
+                searchable={vendors.length > 3}
                 className="sm:col-span-2"
               />
-              {form.agent_id ? (
-                <Input
-                  label="Agent Commission (%)"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  required
-                  value={form.agent_commission_percentage}
-                  error={commissionError}
-                  onChange={(agent_commission_percentage) => {
-                    setCommissionError("");
-                    setForm({ ...form, agent_commission_percentage });
-                  }}
-                  placeholder="e.g. 10"
-                  className="sm:col-span-2"
-                />
+              {form.vendor_id ? (
+                <>
+                  <Input
+                    label="Platform Commission (%)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    required
+                    value={form.platform_commission_percentage}
+                    error={commissionError}
+                    onChange={(platform_commission_percentage) => {
+                      setCommissionError("");
+                      setForm({ ...form, platform_commission_percentage });
+                    }}
+                    placeholder="e.g. 15"
+                    className="sm:col-span-2"
+                  />
+                  {payoutPreview ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-800 sm:col-span-2">
+                      <p className="text-xs font-black uppercase tracking-widest text-slate-500">Per-ticket split preview</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                        <div>
+                          <p className="text-xs font-bold text-slate-500">Ticket price</p>
+                          <p className="font-black">Rs. {Number(form.price || 0).toLocaleString("en-IN")}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-500">Platform ({payoutPreview.platformPct}%)</p>
+                          <p className="font-black text-amber-700">Rs. {payoutPreview.platformAmount.toLocaleString("en-IN")}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-500">Vendor payout</p>
+                          <p className="font-black text-emerald-700">Rs. {payoutPreview.vendorAmount.toLocaleString("en-IN")}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : commissionError ? (
+                <p className="text-sm font-bold text-red-600 sm:col-span-2">{commissionError}</p>
               ) : null}
               <Input
                 label="Price"
